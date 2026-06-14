@@ -1,0 +1,106 @@
+* {
+    font-family: "JetBrainsMono Nerd Font Mono", monospace;
+    font-size: 12px;
+    min-height: 0;
+    border: none;
+    border-radius: 0;
+}
+
+window#waybar {
+    background-color: #0a0a12;
+    color: #e0e0e8;
+    border-bottom: 1px solid #1a1a2e;
+}
+
+/* Workspaces */
+#workspaces {
+    margin: 0 4px;
+}
+
+#workspaces button {
+    padding: 0 6px;
+    background: transparent;
+    color: #3a3a50;
+    border-radius: 0;
+    margin: 0;
+    box-shadow: none;
+}
+
+#workspaces button:hover {
+    background: transparent;
+    color: #606078;
+    box-shadow: none;
+}
+
+#workspaces button.active {
+    background: transparent;
+    color: #4488ff;
+}
+
+#workspaces button.urgent {
+    color: #cc4444;
+}
+
+/* Window title */
+#window {
+    color: #505060;
+    padding: 0 8px;
+    font-style: italic;
+}
+
+/* Clock */
+#clock {
+    color: #e0e0e8;
+    padding: 0 12px;
+    font-weight: bold;
+}
+
+/* Right modules */
+#wireplumber,
+#network,
+#cpu,
+#memory,
+#temperature,
+#backlight,
+#battery,
+#tray {
+    padding: 0 8px;
+    color: #9090a8;
+}
+
+#wireplumber.muted {
+    color: #3a3a50;
+}
+
+#network.disconnected {
+    color: #cc4444;
+}
+
+#temperature.critical {
+    color: #cc4444;
+}
+
+#battery.warning:not(.charging) {
+    color: #ccaa00;
+}
+
+#battery.critical:not(.charging) {
+    color: #cc4444;
+}
+
+#battery.charging,
+#battery.plugged {
+    color: #4488ff;
+}
+
+#tray {
+    padding: 0 6px;
+}
+
+#tray > .passive {
+    -gtk-icon-effect: dim;
+}
+
+#tray > .needs-attention {
+    color: #cc4444;
+}

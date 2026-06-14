@@ -1,0 +1,97 @@
+// -*- mode: jsonc -*-
+{
+    "layer": "top",
+    "position": "top",
+    "height": 26,
+    "spacing": 0,
+
+    "modules-left": [
+        "hyprland/workspaces",
+        "hyprland/window"
+    ],
+    "modules-center": [
+        "clock"
+    ],
+    "modules-right": [
+        "tray",
+        "wireplumber",
+        "network",
+        "cpu",
+        "memory",
+        "temperature",
+        "backlight",
+        "battery"
+    ],
+
+    "hyprland/workspaces": {
+        "disable-scroll": false,
+        "all-outputs": true,
+        "format": "{id}",
+        "persistent-workspaces": {
+            "*": 5
+        }
+    },
+
+    "hyprland/window": {
+        "max-length": 60,
+        "separate-outputs": true
+    },
+
+    "clock": {
+        "format": "{:%H:%M}",
+        "format-alt": "{:%Y-%m-%d %H:%M}",
+        "tooltip-format": "<tt><small>{calendar}</small></tt>"
+    },
+
+    "wireplumber": {
+        "format": "vol {volume}%",
+        "format-muted": "vol --",
+        "on-click": "pavucontrol"
+    },
+
+    "network": {
+        "interface": "wlan0",
+        "format-wifi": "net {essid}",
+        "format-ethernet": "net {ipaddr}",
+        "format-disconnected": "net --",
+        "tooltip-format": "{ifname}: {ipaddr}\n{bandwidthUpBytes} up  {bandwidthDownBytes} down"
+    },
+
+    "cpu": {
+        "format": "cpu {usage}%",
+        "interval": 2,
+        "tooltip": false
+    },
+
+    "memory": {
+        "format": "mem {used:.1f}G",
+        "tooltip-format": "{used:.1f}G / {total:.1f}G"
+    },
+
+    "temperature": {
+        "critical-threshold": 80,
+        "format": "tmp {temperatureC}c",
+        "format-critical": "tmp {temperatureC}c !!"
+    },
+
+    "backlight": {
+        "device": "amdgpu_bl2",
+        "format": "brt {percent}%"
+    },
+
+    "battery": {
+        "bat": "BAT0",
+        "states": {
+            "warning": 30,
+            "critical": 15
+        },
+        "format": "bat {capacity}%",
+        "format-charging": "chg {capacity}%",
+        "format-plugged": "bat {capacity}%"
+    },
+
+    "tray": {
+        "icon-size": 14,
+        "spacing": 6
+    }
+}
