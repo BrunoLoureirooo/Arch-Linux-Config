@@ -1,0 +1,37 @@
+# Copy to .env in this directory and fill in the real Proton VPN values:
+#   cp .env.example .env && chmod 600 .env
+# .env is gitignored and must never be committed - this repo is public.
+#
+# This is the FIRST of two Proton WireGuard configs. The second one is for the
+# host-wide tunnel and lives in /etc/wireguard/proton.conf. They must use
+# SEPARATE keys: WireGuard identifies a peer by its key, so the same key active
+# in two places makes Proton's endpoint flap between them.
+
+# From account.protonvpn.com -> Downloads -> WireGuard configuration.
+# Generate for GNU/Linux and enable "NAT-PMP (Port Forwarding)".
+# PrivateKey line of the [Interface] section:
+WIREGUARD_PRIVATE_KEY=
+
+# Proton always issues 10.2.0.2/32, which is the default in docker-compose.yml.
+# Only set this if your downloaded config shows a different Address.
+WIREGUARD_ADDRESSES=10.2.0.2/32
+
+# Exit location. Must be a P2P-enabled server for torrenting. Pick a different
+# city to the host tunnel if you want the two exit IPs clearly separated.
+# See: docker run --rm qmcgaw/gluetun formatServers --protonvpn
+SERVER_CITIES=Amsterdam
+
+# Port forwarding. Requires a PAID Proton plan and NAT-PMP enabled on the key
+# above. The forwarded port is random and rotates, so qBittorrent's listening
+# port has to be re-synced when it changes.
+VPN_PORT_FORWARDING=off
+PORT_FORWARD_ONLY=off
+
+# Owner of the files qBittorrent writes. Matches `id` on this machine:
+# uid=1000(vyrus-extreme) gid=982(users)
+PUID=1000
+PGID=982
+
+# Absolute paths only - Docker Compose does NOT expand `~` in .env files.
+QBITTORRENT_CONFIG_DIR=/home/vyrus-extreme/.local/share/qbittorrent
+QBITTORRENT_DOWNLOADS_DIR=/home/vyrus-extreme/Downloads/torrents

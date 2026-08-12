@@ -1,0 +1,18 @@
+# Copy to .env in this directory:
+#   cp .env.example .env
+#
+# No secrets here - Plex is claimed by signing in at http://localhost:32400/web
+# from this machine. Local connections are trusted, so no claim token is needed.
+
+# Matches `id` on this machine: uid=1000(vyrus-extreme) gid=982(users)
+PUID=1000
+PGID=982
+
+# Host is currently set to UTC. Change to Europe/Lisbon if you want Plex's
+# scheduled tasks and timestamps in local time.
+TZ=UTC
+
+# Absolute paths only - Docker Compose does NOT expand `~` in .env files.
+PLEX_CONFIG_DIR=/home/vyrus-extreme/.local/share/plex
+# Shares qBittorrent's download directory, mounted read-only.
+PLEX_MEDIA_DIR=/home/vyrus-extreme/Downloads/torrents

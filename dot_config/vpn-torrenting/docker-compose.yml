@@ -1,0 +1,47 @@
+# qBittorrent is tunnelled through gluetun, independently of the host-wide
+# wg-quick@proton tunnel. /etc/wireguard/proton.conf excludes 172.16.0.0/12
+# from the host tunnel, so this container reaches Proton directly rather than
+# nesting one WireGuard tunnel inside another (which would stack MTU overhead
+# and halve throughput).
+#
+# Net effect: qBittorrent exits via one Proton IP, the rest of the machine via
+# another, and gluetun's kill switch is independent of the host tunnel.
+
+services:
+  gluetun:
+    image: qmcgaw/gluetun
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - VPN_SERVICE_PROVIDER=protonvpn
+      - VPN_TYPE=wireguard
+      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
+      - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES:-10.2.0.2/32}
+      - SERVER_CITIES=${SERVER_CITIES}
+      - VPN_PORT_FORWARDING=${VPN_PORT_FORWARDING:-off}
+      - PORT_FORWARD_ONLY=${PORT_FORWARD_ONLY:-off}
+    ports:
+      - 8080:8080
+      # Peer port. Only useful with port forwarding enabled; otherwise it just
+      # exposes a torrent client on your real IP. Safe to delete both lines.
+      - 6881:6881
+      - 6881:6881/udp
+    restart: unless-stopped
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent
+    container_name: qbittorrent
+    network_mode: "service:gluetun"
+    depends_on:
+      - gluetun
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - WEBUI_PORT=8080
+    volumes:
+      - ${QBITTORRENT_CONFIG_DIR:-./qbittorrent-config}:/config
+      - ${QBITTORRENT_DOWNLOADS_DIR:-./downloads}:/downloads
+    restart: unless-stopped

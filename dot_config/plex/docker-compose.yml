@@ -1,0 +1,28 @@
+# Plex, for local playback on this machine only.
+#
+# network_mode: host is deliberate. It puts Plex inside the host-wide
+# wg-quick@proton tunnel, so its outbound traffic is tunnelled and covered by
+# the OUTPUT kill switch - unlike bridge-networked containers, which the
+# 172.16.0.0/12 rule in /etc/wireguard/proton.conf excludes from the tunnel.
+#
+# The tradeoff is that remote access will NOT work: a VPN with no stable
+# forwarded port can't accept inbound connections, so Plex would fall back to
+# Relay. That is fine here because playback is local. If you ever want to reach
+# this from outside the house, switch to bridge networking with 32400
+# published, and expect to forward the port on your router.
+
+services:
+  plex:
+    image: lscr.io/linuxserver/plex
+    container_name: plex
+    network_mode: host
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - VERSION=docker
+    volumes:
+      - ${PLEX_CONFIG_DIR:-./config}:/config
+      # Read-only: Plex writes metadata to /config, never to the library.
+      - ${PLEX_MEDIA_DIR:-./media}:/data/media:ro
+    restart: unless-stopped

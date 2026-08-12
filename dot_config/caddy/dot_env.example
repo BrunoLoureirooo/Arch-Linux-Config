@@ -1,0 +1,8 @@
+# Copy to .env in this directory:
+#   cp .env.example .env
+#
+# No secrets here.
+
+# Absolute paths only - Docker Compose does NOT expand `~` in .env files.
+CADDYFILE=/home/vyrus-extreme/.config/caddy/Caddyfile
+CADDY_DATA_DIR=/home/vyrus-extreme/.local/share/caddy

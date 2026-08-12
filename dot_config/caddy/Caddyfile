@@ -1,0 +1,29 @@
+# Local hostname routing so services are reachable by name instead of port.
+# Requires this line in /etc/hosts (needs sudo, see the stack README notes):
+#   127.0.0.1  plex.lan qbt.lan
+
+{
+	# Loopback only. These names are for this machine, so there is no reason to
+	# expose the proxy to the LAN.
+	default_bind 127.0.0.1
+
+	# .lan is not a public TLD, so there is no certificate authority that could
+	# ever issue for it. Without this, Caddy would keep retrying ACME and fail.
+	auto_https off
+
+	admin off
+}
+
+http://plex.lan {
+	# Plex tolerates a proxied Host header fine, so pass it through unchanged.
+	reverse_proxy 127.0.0.1:32400
+}
+
+http://qbt.lan {
+	# qBittorrent validates the Host header and returns 401 when it sees an
+	# unexpected value. Rewriting it to the real upstream avoids having to turn
+	# that protection off in the WebUI.
+	reverse_proxy 127.0.0.1:8080 {
+		header_up Host {upstream_hostport}
+	}
+}

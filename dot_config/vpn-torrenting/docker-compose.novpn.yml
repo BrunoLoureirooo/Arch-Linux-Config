@@ -1,0 +1,35 @@
+# ============================================================================
+# TEMPORARY - NO VPN. Torrent traffic goes out over your real IP.
+#
+# This exists so the stack is usable before the Proton keys arrive. It runs
+# qBittorrent on ordinary Docker networking with no gluetun and no kill switch.
+# There is nothing protecting this traffic.
+#
+#   start (no VPN):   docker compose -f docker-compose.novpn.yml up -d
+#   switch back:      docker compose up -d
+#
+# Both files use container_name: qbittorrent and the same compose project, so
+# they cannot run at the same time - starting one replaces the other. The
+# /config volume is shared, so WebUI settings and torrents carry over intact.
+# ============================================================================
+
+services:
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent
+    container_name: qbittorrent
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - WEBUI_PORT=8080
+    ports:
+      # WebUI, reachable via http://qbt.lan through Caddy.
+      - 8080:8080
+      # Peer port. Commented out deliberately: opening it accepts inbound
+      # connections straight to your real IP. Outbound peering still works
+      # without it, you just get fewer peers. Uncomment if you want it.
+      # - 6881:6881
+      # - 6881:6881/udp
+    volumes:
+      - ${QBITTORRENT_CONFIG_DIR:-./qbittorrent-config}:/config
+      - ${QBITTORRENT_DOWNLOADS_DIR:-./downloads}:/downloads
+    restart: unless-stopped
