@@ -20,10 +20,7 @@ http://plex.lan {
 }
 
 http://qbt.lan {
-	# qBittorrent validates the Host header and returns 401 when it sees an
-	# unexpected value. Rewriting it to the real upstream avoids having to turn
-	# that protection off in the WebUI.
-	reverse_proxy 127.0.0.1:8080 {
-		header_up Host {upstream_hostport}
-	}
+	# Pass Host through unchanged. qBittorrent cross-checks Referer against
+	# Host, so rewriting Host makes every browser login fail with 401.
+	reverse_proxy 127.0.0.1:8080
 }
