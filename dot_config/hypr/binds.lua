@@ -7,8 +7,10 @@ local pools = require("lib.pools")
 local M = {}
 local assigned = {} -- session memory: extra monitors keep their pool by name
 
+-- nil when no monitor is active (lid closed with no external screen, headless).
 local function active_pool()
     local mon = hl.get_active_monitor()
+    if not mon then return nil end
     return mon, pools.pool_for(mon, assigned)
 end
 
@@ -18,19 +20,23 @@ function M.pool_of(name)
 end
 
 function M.focus_slot(slot)
-    local _, pool = active_pool()
+    local mon, pool = active_pool()
+    if not mon then return end
     hl.dispatch(hl.dsp.focus({ workspace = pools.ws_id(pool, slot) }))
 end
 
 function M.move_to_slot(slot)
-    local _, pool = active_pool()
+    local mon, pool = active_pool()
+    if not mon then return end
     hl.dispatch(hl.dsp.window.move({ workspace = pools.ws_id(pool, slot) }))
 end
 
 -- Previous/next slot on the focused screen; clamps at 1 and 5, never wraps.
 function M.step(delta)
     local mon, pool = active_pool()
-    local slot = pools.slot_of(mon.active_workspace.id, pool)
+    if not mon then return end
+    local ws = mon.active_workspace
+    local slot = ws and pools.slot_of(ws.id, pool) or 1
     hl.dispatch(hl.dsp.focus({ workspace = pools.ws_id(pool, pools.step(slot, delta)) }))
 end
 
@@ -51,7 +57,9 @@ for key, dir in pairs(dirs) do
     hl.bind("SUPER + ALT + SHIFT + " .. key, hl.dsp.window.move({ direction = dir }))
 end
 
-hl.bind("SUPER + grave", hl.dsp.focus({ monitor = "+1" }), { description = "focus the other monitor" })
+-- Super + the key under Esc, by keycode (TLDE): on the pt layout that key's
+-- keysym is backslash, not grave, so a "grave" bind would never fire.
+hl.bind("SUPER + code:49", hl.dsp.focus({ monitor = "+1" }), { description = "focus the other monitor" })
 hl.bind("SUPER + Tab", hl.dsp.window.cycle_next(), { description = "cycle windows" })
 hl.bind("SUPER + SPACE", hl.dsp.exec_cmd("qs ipc call launcher toggle"), { description = "launcher" })
 hl.bind("SUPER + Q", hl.dsp.window.close())

@@ -200,7 +200,7 @@ All window-manager binds use `Super`, `Ctrl+Alt` or `Ctrl` with a digit; none of
 | Ctrl + Alt + ← → and mouse side buttons | step previous/next slot on this screen |
 | Super + Alt + ←↑↓→ or h j k l | focus window |
 | Super + Alt + Shift + ←↑↓→ or h j k l | move window (crosses to the other screen at an edge) |
-| Super + ` | focus the other monitor |
+| Super + the key under Esc (code:49) | focus the other monitor (bound by keycode: on the owner's pt layout that key's keysym is backslash, not grave) |
 | Super + Tab | cycle windows on this screen |
 | Super + Space | launcher |
 | Super + Q | close window |
