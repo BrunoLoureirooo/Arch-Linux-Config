@@ -1,0 +1,56 @@
+# macOS-style shortcuts for GUI apps (spec section 6). Not applied to kitty:
+# Ctrl+C there must stay SIGINT, and kitty handles Super itself (kitty.conf).
+# exact_match is on so Super+Shift+T is not also caught by the Super+T rule, and
+# Alt+Shift+Left is not caught by Alt+Left.
+# Keep every entry a flat "Key: Value" line: tests/test_keymap_collisions.py
+# parses this file to check that no Hyprland bind equals an output below.
+keymap:
+  - name: Super letters to Ctrl
+    application:
+      not: [kitty]
+    exact_match: true
+    remap:
+      Super-c: Ctrl-c
+      Super-v: Ctrl-v
+      Super-x: Ctrl-x
+      Super-a: Ctrl-a
+      Super-z: Ctrl-z
+      Super-f: Ctrl-f
+      Super-s: Ctrl-s
+      Super-l: Ctrl-l
+      Super-w: Ctrl-w
+      Super-n: Ctrl-n
+      Super-r: Ctrl-r
+      Super-t: Ctrl-t
+
+  - name: Super+Shift letters to Ctrl+Shift
+    application:
+      not: [kitty]
+    exact_match: true
+    remap:
+      Super-Shift-t: Ctrl-Shift-t
+      Super-Shift-z: Ctrl-Shift-z
+      Super-Shift-n: Ctrl-Shift-n
+
+  - name: Super arrows to line and document ends
+    application:
+      not: [kitty]
+    exact_match: true
+    remap:
+      Super-Left: Home
+      Super-Right: End
+      Super-Shift-Left: Shift-Home
+      Super-Shift-Right: Shift-End
+      Super-Up: Ctrl-Home
+      Super-Down: Ctrl-End
+
+  - name: Alt to word movement
+    application:
+      not: [kitty]
+    exact_match: true
+    remap:
+      Alt-Left: Ctrl-Left
+      Alt-Right: Ctrl-Right
+      Alt-Backspace: Ctrl-Backspace
+      Alt-Shift-Left: Ctrl-Shift-Left
+      Alt-Shift-Right: Ctrl-Shift-Right
