@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+"""rice-palette: derive a neon palette from a wallpaper and write the desktop's colour files.
+
+  rice-palette derive <image>   print the eight tokens as JSON (cached by file hash)
+  rice-palette apply  <image>   derive, write the colour files, reload kitty and Hyprland
+
+Set RICE_NO_RELOAD (any non-empty value) to skip the reloads, RICE_MATUGEN to pick the
+matugen binary.
+"""
+import hashlib
+import json
+import os
+import resource
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "share" / "rice"))
+
+from outputs import (render_btop, render_hypr, render_kitty, render_quickshell,  # noqa: E402
+                     roles_from_matugen)
+from palette import derive_palette  # noqa: E402
+
+MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a")
+MATUGEN_TIMEOUT = 60
+MATUGEN_MEM = 4 << 30  # address-space cap so a huge image fails instead of eating the box
+
+
+class Fail(Exception):
+    pass
+
+
+def is_image(path):
+    if shutil.which("file"):
+        r = subprocess.run(["file", "--mime-type", "-b", str(path)], capture_output=True, text=True)
+        if r.returncode == 0:
+            return r.stdout.strip().startswith("image/")
+    with open(path, "rb") as f:
+        head = f.read(12)
+    return head.startswith(MAGIC) or (head[:4] == b"RIFF" and head[8:12] == b"WEBP")
+
+
+def check_image(arg):
+    path = Path(arg)
+    if not path.exists():
+        raise Fail(f"no such file: {arg}")
+    if not path.is_file():
+        raise Fail(f"not a regular file: {arg}")
+    try:
+        data = path.read_bytes()
+    except OSError as e:
+        raise Fail(f"cannot read {arg}: {e.strerror}")
+    if not data or not is_image(path):
+        raise Fail(f"not an image: {arg}")
+    return path.resolve(), data
+
+
+def run_matugen(path):
+    exe = os.environ.get("RICE_MATUGEN") or "matugen"
+    cmd = [exe, "image", str(path), "--json", "hex", "--dry-run", "-m", "dark",
+           "-t", "scheme-vibrant", "--source-color-index", "0", "-q"]
+
+    def limit():
+        resource.setrlimit(resource.RLIMIT_AS, (MATUGEN_MEM, MATUGEN_MEM))
+
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=MATUGEN_TIMEOUT,
+                           stdin=subprocess.DEVNULL, preexec_fn=limit)
+    except FileNotFoundError:
+        raise Fail(f"matugen not found ({exe})")
+    except subprocess.TimeoutExpired:
+        raise Fail("matugen timed out")
+    if r.returncode != 0:
+        raise Fail("matugen failed: " + (r.stderr.strip().splitlines() or ["no output"])[-1])
+    try:
+        return roles_from_matugen(json.loads(r.stdout))
+    except (ValueError, RecursionError) as e:
+        raise Fail(f"unusable matugen output: {e}")
+
+
+def derive(arg):
+    path, data = check_image(arg)
+    home = Path.home()
+    cache = home / ".cache" / "rice" / f"{hashlib.sha1(data).hexdigest()}.json"
+    try:
+        tokens = json.loads(cache.read_text())
+        if isinstance(tokens, dict) and len(tokens) == 8:
+            return path, tokens
+    except (OSError, ValueError):
+        pass
+    try:
+        tokens = derive_palette(run_matugen(path))
+    except ValueError as e:
+        raise Fail(f"cannot derive palette: {e}")
+    try:
+        write_atomic_all({cache: json.dumps(tokens)})
+    except OSError:
+        pass  # the cache is an optimisation only
+    return path, tokens
+
+
+def write_atomic_all(files):
+    """Write every file to a temp name first, then rename them all into place."""
+    temps = []
+    try:
+        for target, text in files.items():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_name(f".{target.name}.tmp{os.getpid()}")
+            temps.append((tmp, target))
+            tmp.write_text(text)
+        for tmp, target in temps:
+            os.replace(tmp, target)
+    finally:
+        for tmp, _ in temps:
+            tmp.unlink(missing_ok=True)
+
+
+def reload():
+    for cmd in (["pkill", "-USR1", "-x", "kitty"], ["hyprctl", "reload"]):
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=10)
+            # pkill exits 1 when no kitty is running; that is not a problem.
+            if r.returncode != 0 and cmd[0] != "pkill":
+                print(f"warning: {' '.join(cmd)} exited {r.returncode}", file=sys.stderr)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            print(f"warning: {' '.join(cmd)} failed: {e}", file=sys.stderr)
+
+
+def apply(arg):
+    path, tokens = derive(arg)
+    home = Path.home()
+    files = {
+        home / ".config/quickshell/colors.json": render_quickshell(tokens),
+        home / ".config/kitty/colors.conf": render_kitty(tokens),
+        home / ".config/hypr/colors.lua": render_hypr(tokens),
+        home / ".config/btop/themes/rice.theme": render_btop(tokens),
+        home / ".local/state/quickshell/wallpaper.json":
+            json.dumps({"path": str(path), "palette": path.stem}) + "\n",
+    }
+    try:
+        write_atomic_all(files)
+    except OSError as e:
+        raise Fail(f"cannot write {e.filename}: {e.strerror}")
+    if not os.environ.get("RICE_NO_RELOAD"):
+        reload()
+
+
+def main(argv):
+    if len(argv) != 3 or argv[1] not in ("derive", "apply"):
+        print("usage: rice-palette derive|apply <image>", file=sys.stderr)
+        return 2
+    try:
+        if argv[1] == "derive":
+            print(json.dumps(derive(argv[2])[1], indent=2))
+        else:
+            apply(argv[2])
+    except Fail as e:
+        print(f"rice-palette: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
