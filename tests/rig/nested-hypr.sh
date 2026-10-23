@@ -34,11 +34,21 @@ command -v labwc >/dev/null || die "labwc not found in testbin; rerun setup-test
 
 live_sigs() { cat "$TB/live.sig" 2>/dev/null || true; }
 
+# True only if <pid> is a process of ours named <comm> that carries RICE_RIG_ID=<id>.
+# A recorded PID alone proves nothing: nested.env survives reboots and PIDs get reused.
+pid_is_ours() {
+    local pid="$1" id="$2" comm="$3"
+    [[ "$pid" =~ ^[0-9]+$ && -n "$id" && -O "/proc/$pid" ]] || return 1
+    [[ "$(cat "/proc/$pid/comm" 2>/dev/null)" == "$comm" ]] || return 1
+    tr '\0' '\n' 2>/dev/null <"/proc/$pid/environ" | grep -qxF "RICE_RIG_ID=$id"
+}
+
 is_running() {
     [[ -s "$NESTED_ENV" ]] || return 1
-    local pid
+    local pid id
     pid=$(sed -n 's/^export NESTED_PID=//p' "$NESTED_ENV")
-    [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+    id=$(sed -n 's/^export RICE_RIG_ID=//p' "$NESTED_ENV")
+    pid_is_ours "$pid" "$id" Hyprland
 }
 
 # PIDs of our own processes that carry this rig's marker in their environment.
@@ -71,7 +81,10 @@ kill_all() {
         [[ -z "$(marked_hyprland "$id")" ]] && break
         sleep 0.1
     done
-    kill -TERM "$parent" 2>/dev/null || true
+    # Never signal a raw recorded PID: only our labwc carrying this run's marker.
+    if pid_is_ours "$parent" "$id" labwc; then
+        kill -TERM "$parent" 2>/dev/null || true
+    fi
     sleep 0.3
     pids=$(marked_pids "$id")
     if [[ -n "$pids" ]]; then
@@ -204,6 +217,14 @@ cmd_stop() {
     id=$(sed -n 's/^export RICE_RIG_ID=//p' "$NESTED_ENV")
     sig=$(sed -n 's/^export HYPRLAND_INSTANCE_SIGNATURE=//p' "$NESTED_ENV")
     [[ -n "$pid" && -n "$parent" && -n "$id" && -n "$sig" ]] || die "malformed $NESTED_ENV"
+    if ! is_running; then
+        # Stale record (reboot, crash, PID reuse): signal only processes that still
+        # carry this run's marker, never the raw recorded PIDs; keep the instance dir.
+        kill_all "$id" ""
+        rm -f "$NESTED_ENV"
+        echo "nested-hypr: removed stale $NESTED_ENV (pid $pid is not this rig's Hyprland; no recorded PID signalled)"
+        return 0
+    fi
     kill_all "$id" "$parent"
     # Hyprland removes its lock on exit but leaves the instance dir (log + stale
     # socket). Keep a copy of the log, then remove the dir only if it is ours: not a

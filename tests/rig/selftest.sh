@@ -56,5 +56,34 @@ layers=$("$R/run.sh" hyprctl layers -j | grep -c '"namespace": "quickshell"' || 
 
 "$R/nested-hypr.sh" stop
 trap - EXIT
+
+# Regression: a stale nested.env (reboot / PID reuse) must never make `stop` signal the
+# recorded PIDs. Point the record at a throwaway `sleep` this test starts itself (never
+# a session process), run stop, and require the sleep to survive.
+if [[ -e "$TB/nested.env" ]]; then
+    fail "stale-record test: $TB/nested.env still exists after stop; not overwriting it"
+else
+    sleep 300 &
+    decoy=$!
+    cat >"$TB/nested.env" <<ENV
+export NESTED_PID=$decoy
+export NESTED_PARENT_PID=$decoy
+export RICE_RIG_ID=rig-stale-selftest-$$
+export HYPRLAND_INSTANCE_SIGNATURE=rig-stale-selftest-sig-$$
+export WAYLAND_DISPLAY=wayland-rig-stale
+ENV
+    status_out=$("$R/nested-hypr.sh" status 2>&1 || true)
+    stop_out=$("$R/nested-hypr.sh" stop 2>&1 || true)
+    echo "  status: $status_out" | head -n 1
+    echo "  stop:   $stop_out"
+    [[ "$status_out" == "not running"* ]] && pass "stale record not reported as running" \
+        || fail "stale record reported as running"
+    kill -0 "$decoy" 2>/dev/null && pass "stop left the decoy PID $decoy alive" \
+        || fail "stop signalled the recorded (non-rig) PID $decoy"
+    [[ ! -e "$TB/nested.env" && "$stop_out" == *stale* ]] && pass "stop reported and removed the stale record" \
+        || fail "stale record not reported/removed"
+    kill "$decoy" 2>/dev/null || true
+    wait "$decoy" 2>/dev/null || true
+fi
 echo "screenshots: $SHOTS/selftest-*.png"
 [[ $fails -eq 0 ]] && echo "SELFTEST OK" || { echo "SELFTEST: $fails failure(s)"; exit 1; }
