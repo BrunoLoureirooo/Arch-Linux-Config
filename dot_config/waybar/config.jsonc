@@ -50,7 +50,6 @@
     },
 
     "network": {
-        "interface": "wlan0",
         "format-wifi": "net {essid}",
         "format-ethernet": "net {ipaddr}",
         "format-disconnected": "net --",
