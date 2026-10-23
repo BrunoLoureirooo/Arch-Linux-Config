@@ -274,6 +274,118 @@ class TestCli(Sandbox):
         self.assertIn("warning", r.stderr)
 
 
+    # ---- fix round 1 ----
+    def alt_matugen(self):
+        doc = json.loads(FIXTURE.read_text())
+        doc["colors"]["primary"]["dark"]["color"] = "#7aa2ff"
+        doc["colors"]["tertiary"]["dark"]["color"] = "#7aff9a"
+        f = self.work / "alt.json"
+        f.write_text(json.dumps(doc))
+        return self.fake_matugen(f"cat {f}")
+
+    def snap_no_cache(self):
+        return {k: v for k, v in self.snapshot().items() if not k.startswith(".cache")}
+
+    def good_apply(self):
+        img = self.work / "good.png"
+        img.write_bytes(png(8, 8))
+        self.assertEqual(self.run_cli("apply", img).returncode, 0)
+        other = self.work / "other.png"
+        other.write_bytes(png(9, 9))
+        return other
+
+    def one_line_failure(self, r):
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertEqual(len(r.stderr.strip().splitlines()), 1, r.stderr)
+        self.assertNotIn("None", r.stderr)
+
+    def test_unwritable_dir_leaves_files(self):
+        other = self.good_apply()
+        before = self.snap_no_cache()
+        d = self.home / ".config/btop/themes"
+        d.chmod(0o500)
+        self.addCleanup(d.chmod, 0o700)
+        r = self.run_cli("apply", other, matugen=self.alt_matugen())
+        self.one_line_failure(r)
+        d.chmod(0o700)
+        self.assertEqual(self.snap_no_cache(), before)
+
+    def test_blocked_directory_path_fails_cleanly(self):
+        other = self.good_apply()
+        (self.home / ".config/btop").rename(self.home / "moved")
+        (self.home / ".config/btop").write_text("i am a file")
+        before = self.snap_no_cache()
+        r = self.run_cli("apply", other, matugen=self.alt_matugen())
+        self.one_line_failure(r)
+        self.assertEqual(self.snap_no_cache(), before)
+
+    def test_replace_failure_rolls_back(self):
+        other = self.good_apply()
+        last = self.outputs_paths()[-1]
+        last.unlink()
+        last.mkdir()
+        before = self.snap_no_cache()
+        r = self.run_cli("apply", other, matugen=self.alt_matugen())
+        self.one_line_failure(r)
+        self.assertEqual(self.snap_no_cache(), before)
+        self.assertTrue(last.is_dir())
+        self.assertEqual([p.name for p in self.home.rglob("*.tmp*")], [])
+
+    def test_replace_failure_on_fresh_home_creates_nothing(self):
+        last = self.outputs_paths()[-1]
+        last.mkdir(parents=True)
+        img = self.work / "a.png"
+        img.write_bytes(png(8, 8))
+        r = self.run_cli("apply", img)
+        self.one_line_failure(r)
+        self.assertEqual(self.snap_no_cache(), {})
+        self.assertEqual([p.name for p in self.home.rglob("*.tmp*")], [])
+
+    def test_undecodable_matugen_output(self):
+        img = self.work / "a.png"
+        img.write_bytes(png(8, 8))
+        r = self.run_cli("apply", img, matugen=self.fake_matugen("printf '\\377\\376\\377'"))
+        self.one_line_failure(r)
+        self.assertEqual(self.snapshot(), {})
+
+    def test_non_executable_matugen(self):
+        img = self.work / "a.png"
+        img.write_bytes(png(8, 8))
+        mg = self.work / "noexec"
+        mg.write_text("#!/bin/sh\ncat x\n")
+        mg.chmod(0o644)
+        r = self.run_cli("apply", img, matugen=mg)
+        self.one_line_failure(r)
+        self.assertEqual(self.snapshot(), {})
+
+    def test_bad_cache_entry_is_recomputed(self):
+        img = self.work / "a.png"
+        img.write_bytes(png(8, 8))
+        cache = self.home / ".cache/rice" / (hashlib.sha1(img.read_bytes()).hexdigest() + ".json")
+        cache.parent.mkdir(parents=True)
+        cache.write_text(json.dumps({f"k{i}": "#000000" for i in range(8)}))
+        r = self.run_cli("apply", img)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(set(json.loads(cache.read_text())), KEYS)
+
+    def test_catch_all_in_main(self):
+        import contextlib
+        import io
+        from importlib.machinery import SourceFileLoader
+        mod = SourceFileLoader("rice_palette_cli", str(CLI)).load_module()
+
+        def boom(_):
+            raise RuntimeError("kaboom")
+        mod.derive = boom
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = mod.main(["rice-palette", "derive", "x"])
+        self.assertEqual(rc, 1)
+        self.assertEqual(len(err.getvalue().strip().splitlines()), 1)
+        self.assertNotIn("Traceback", err.getvalue())
+
+
 @unittest.skipUnless(REAL_MATUGEN.exists(), "private matugen not installed")
 class TestRealMatugen(Sandbox):
     def test_grey_and_black_fall_back(self):

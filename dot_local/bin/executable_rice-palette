@@ -10,6 +10,7 @@ matugen binary.
 import hashlib
 import json
 import os
+import re
 import resource
 import shutil
 import subprocess
@@ -22,6 +23,8 @@ from outputs import (render_btop, render_hypr, render_kitty, render_quickshell, 
                      roles_from_matugen)
 from palette import derive_palette  # noqa: E402
 
+TOKENS = ("bg", "panel", "line", "dim", "fg", "a1", "a2", "warn")
+HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a")
 MATUGEN_TIMEOUT = 60
 MATUGEN_MEM = 4 << 30  # address-space cap so a huge image fails instead of eating the box
@@ -47,13 +50,18 @@ def check_image(arg):
         raise Fail(f"no such file: {arg}")
     if not path.is_file():
         raise Fail(f"not a regular file: {arg}")
+    h = hashlib.sha1()
     try:
-        data = path.read_bytes()
+        with open(path, "rb") as f:
+            while chunk := f.read(1 << 20):
+                h.update(chunk)
+        empty = path.stat().st_size == 0
+        image = not empty and is_image(path)
     except OSError as e:
         raise Fail(f"cannot read {arg}: {e.strerror}")
-    if not data or not is_image(path):
+    if not image:
         raise Fail(f"not an image: {arg}")
-    return path.resolve(), data
+    return path.resolve(), h.hexdigest()
 
 
 def run_matugen(path):
@@ -65,30 +73,34 @@ def run_matugen(path):
         resource.setrlimit(resource.RLIMIT_AS, (MATUGEN_MEM, MATUGEN_MEM))
 
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=MATUGEN_TIMEOUT,
+        r = subprocess.run(cmd, capture_output=True, timeout=MATUGEN_TIMEOUT,
                            stdin=subprocess.DEVNULL, preexec_fn=limit)
     except FileNotFoundError:
         raise Fail(f"matugen not found ({exe})")
     except subprocess.TimeoutExpired:
         raise Fail("matugen timed out")
+    except (OSError, subprocess.SubprocessError) as e:
+        raise Fail(f"cannot run matugen ({exe}): {e}")
     if r.returncode != 0:
-        raise Fail("matugen failed: " + (r.stderr.strip().splitlines() or ["no output"])[-1])
+        err = r.stderr.decode("utf-8", "replace").strip().splitlines()
+        raise Fail("matugen failed: " + (err or ["no output"])[-1])
     try:
-        return roles_from_matugen(json.loads(r.stdout))
+        return roles_from_matugen(json.loads(r.stdout.decode("utf-8")))
     except (ValueError, RecursionError) as e:
         raise Fail(f"unusable matugen output: {e}")
 
 
 def derive(arg):
-    path, data = check_image(arg)
+    path, digest = check_image(arg)
     home = Path.home()
-    cache = home / ".cache" / "rice" / f"{hashlib.sha1(data).hexdigest()}.json"
+    cache = home / ".cache" / "rice" / f"{digest}.json"
     try:
         tokens = json.loads(cache.read_text())
-        if isinstance(tokens, dict) and len(tokens) == 8:
+        if (isinstance(tokens, dict) and set(tokens) == set(TOKENS)
+                and all(isinstance(v, str) and HEX.match(v) for v in tokens.values())):
             return path, tokens
     except (OSError, ValueError):
-        pass
+        pass  # missing or corrupt cache: recompute
     try:
         tokens = derive_palette(run_matugen(path))
     except ValueError as e:
@@ -101,18 +113,33 @@ def derive(arg):
 
 
 def write_atomic_all(files):
-    """Write every file to a temp name first, then rename them all into place."""
+    """Write every file to a temp name, then rename them all into place.
+
+    If any rename fails, files already replaced are restored from a snapshot and newly
+    created ones are removed, so a failure leaves every target as it was.
+    """
     temps = []
+    done = []  # (target, previous bytes or None if it did not exist)
     try:
         for target, text in files.items():
             target.parent.mkdir(parents=True, exist_ok=True)
             tmp = target.with_name(f".{target.name}.tmp{os.getpid()}")
-            temps.append((tmp, target))
+            temps.append(tmp)
             tmp.write_text(text)
-        for tmp, target in temps:
+        previous = {t: (t.read_bytes() if t.is_file() else None) for t in files}
+        for tmp, target in zip(temps, files):
             os.replace(tmp, target)
+            done.append(target)
+    except BaseException:
+        for target in done:
+            old = previous[target]
+            if old is None:
+                target.unlink(missing_ok=True)
+            else:
+                target.write_bytes(old)
+        raise
     finally:
-        for tmp, _ in temps:
+        for tmp in temps:
             tmp.unlink(missing_ok=True)
 
 
@@ -141,7 +168,7 @@ def apply(arg):
     try:
         write_atomic_all(files)
     except OSError as e:
-        raise Fail(f"cannot write {e.filename}: {e.strerror}")
+        raise Fail(f"cannot write {e.filename or 'output files'}: {e.strerror}")
     if not os.environ.get("RICE_NO_RELOAD"):
         reload()
 
@@ -157,6 +184,10 @@ def main(argv):
             apply(argv[2])
     except Fail as e:
         print(f"rice-palette: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:  # last resort: never show a traceback
+        print(f"rice-palette: unexpected {type(e).__name__}: {e}".replace("\n", " "),
+              file=sys.stderr)
         return 1
     return 0
 
