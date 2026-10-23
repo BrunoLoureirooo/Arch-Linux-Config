@@ -2,7 +2,7 @@
 # Run the repo's Quickshell config, staged as a throwaway HOME, inside the nested rig
 # compositor (start it first with nested-hypr.sh).
 #
-#   qs-run.sh start [--restage] [--entry <file.qml>]
+#   qs-run.sh start [--restage] [--entry <file.qml>] [--path <dirs>]
 #       stage the repo into ~/.cache/rice-testbin/staged/home (stage.sh; the dir is
 #       reused, --restage wipes it first so create_ files are reseeded), then start
 #       `qs -p <staged>/.config/quickshell` in the background with HOME=<staged>,
@@ -11,6 +11,8 @@
 #       --entry runs a test config instead of shell.qml: the file is copied into the
 #       staged config dir as rig-<name>.qml, so `import qs` / `import qs.components`
 #       resolve against the staged shell exactly as production files do.
+#       --path replaces everything after <staged>/.local/bin on qs's PATH (only the
+#       commands qs spawns see it), e.g. to hide nmcli or put a fake one first.
 #       Any other environment (e.g. XDG_DATA_DIRS) is inherited from the caller.
 #   qs-run.sh stop                 stop only the recorded qs (checked by marker env)
 #   qs-run.sh status               running/not running, PID, staged HOME, entry
@@ -47,10 +49,11 @@ read_state() {
 is_running() { read_state && pid_is_ours "$QS_PID" "$QS_RUN_ID"; }
 
 cmd_start() {
-    local restage=0 entry=""
+    local restage=0 entry="" qspath=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --restage) restage=1; shift ;;
+            --path) [[ $# -ge 2 && -n "$2" ]] || die "--path needs a value"; qspath="$2"; shift 2 ;;
             --entry) [[ $# -ge 2 && -f "$2" ]] || die "--entry needs an existing .qml file"; entry=$(realpath "$2"); shift 2 ;;
             *) die "unknown start option: $1" ;;
         esac
@@ -77,12 +80,13 @@ cmd_start() {
     (
         # shellcheck source=tests/rig/rig_env.sh
         source "$R/rig_env.sh"
+        qsbin=$(command -v qs) # resolved before --path can hide it
         export RICE_QS_RUN_ID="$id" RICE_NO_RELOAD=1 HOME="$STAGED" \
             XDG_CONFIG_HOME="$STAGED/.config" XDG_DATA_HOME="$STAGED/.local/share" \
             XDG_STATE_HOME="$STAGED/.local/state" XDG_CACHE_HOME="$STAGED/.cache" \
-            PATH="$STAGED/.local/bin:$PATH"
+            PATH="$STAGED/.local/bin:${qspath:-$PATH}"
         cd "$STAGED"
-        exec qs -p "$target" --no-color
+        exec "$qsbin" -p "$target" --no-color
     ) >"$OUT" 2>&1 </dev/null &
     local pid=$!
     printf 'QS_PID=%s\nQS_RUN_ID=%s\nQS_HOME=%s\nQS_ENTRY=%s\n' "$pid" "$id" "$STAGED" "$target" >"$STATE"
@@ -152,5 +156,5 @@ case "${1:-}" in
         sleep "${QS_SETTLE:-1.5}"
         exec "$R/shot.sh" "$1" "$2" ;;
     home) need_running; echo "$QS_HOME" ;;
-    *) die "usage: qs-run.sh {start [--restage] [--entry file.qml]|stop|status|log|ipc|shot <output> <file>|home}" ;;
+    *) die "usage: qs-run.sh {start [--restage] [--entry file.qml] [--path dirs]|stop|status|log|ipc|shot <output> <file>|home}" ;;
 esac
