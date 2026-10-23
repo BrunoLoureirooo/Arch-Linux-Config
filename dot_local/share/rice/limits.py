@@ -10,7 +10,10 @@ LABELS = {"five_hour": "5h", "seven_day": "7d"}
 
 def _number(v):
     """True for a finite int/float (bool, strings and NaN/inf are not numbers here)."""
-    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+    try:
+        return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+    except OverflowError:  # an int too large for a float
+        return False
 
 
 def _window(w, now):

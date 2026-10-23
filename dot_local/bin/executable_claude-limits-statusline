@@ -11,10 +11,6 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "share" / "rice"))
-
-import limits  # noqa: E402
-
 MAX_STDIN = 1 << 20
 
 
@@ -30,6 +26,10 @@ def read_payload():
 
 
 def main():
+    # Imported here so a missing or broken library exits quietly instead of tracing back.
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "share" / "rice"))
+    import limits
+
     payload = read_payload()
     if payload is None:
         return
@@ -43,13 +43,15 @@ def main():
             limits.write_cache(path, data)
         except (OSError, ValueError, TypeError):
             pass
-    try:
-        line = limits.render_line(data)
-        if line:
+    line = limits.render_line(data)
+    if line:
+        try:
             sys.stdout.write(line + "\n")
             sys.stdout.flush()
-    except OSError:
-        pass
+        except (OSError, ValueError):
+            # Broken stdout: point fd 1 at /dev/null so the interpreter's shutdown flush
+            # of the leftover buffer cannot fail, print a warning or change the exit code.
+            os.dup2(os.open(os.devnull, os.O_WRONLY), 1)
 
 
 if __name__ == "__main__":

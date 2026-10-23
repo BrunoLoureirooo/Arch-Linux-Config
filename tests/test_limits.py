@@ -81,6 +81,14 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(d["five_hour"]["resets_at"], 2000000000)
         self.assertIsInstance(d["five_hour"]["resets_at"], int)
 
+    def test_huge_int_drops_only_that_window(self):
+        payload = json.loads('{"rate_limits": {"five_hour": {"used_percentage": 1%s, '
+                             '"resets_at": 2000000000}, "seven_day": {"used_percentage": 19, '
+                             '"resets_at": 2000100000}}}' % ("0" * 400))
+        d = limits.parse_rate_limits(payload, NOW)
+        self.assertIsNone(d["five_hour"])
+        self.assertEqual(d["seven_day"]["pct"], 19)
+
     def test_render_rounds(self):
         d = limits.parse_rate_limits(win(38.6), NOW)
         self.assertEqual(limits.render_line(d), "5h 39%")
@@ -206,6 +214,27 @@ class CliTests(unittest.TestCase):
         finally:
             locked.chmod(0o700)
         self.assertEqual((r.returncode, r.stdout, r.stderr), (0, b"5h 50%\n", b""))
+
+    def test_library_missing_exits_quietly(self):
+        before = self.seed()
+        alone = Path(self.tmp.name) / "alone"
+        alone.mkdir()
+        cli = alone / "claude-limits-statusline"
+        cli.write_bytes(CLI.read_bytes())
+        env = {**os.environ, "HOME": str(self.home), "CLAUDE_LIMITS_CACHE": str(self.cache)}
+        r = subprocess.run([sys.executable, str(cli)],
+                           input=json.dumps(win(5, 4000000000)).encode(),
+                           capture_output=True, env=env, timeout=30)
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, b"", b""))
+        self.assertEqual(self.cache.read_bytes(), before)
+
+    def test_closed_stdout_pipe(self):
+        env = {**os.environ, "HOME": str(self.home), "CLAUDE_LIMITS_CACHE": str(self.cache)}
+        p = subprocess.Popen([sys.executable, str(CLI)], stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        p.stdout.close()
+        _, err = p.communicate(json.dumps(win(50, 4000000000)).encode(), timeout=30)
+        self.assertEqual((p.returncode, err), (0, b""))
 
     def test_executable_bit(self):
         self.assertTrue(os.access(CLI, os.X_OK))
