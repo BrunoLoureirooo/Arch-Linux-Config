@@ -10,9 +10,19 @@ hl.monitor({ output = "eDP-1", mode = "1920x1080@144", position = "1920x0", scal
 -- you re-add an HDMI display -- note it would collide with the BenQ at 0x0.
 -- hl.monitor({ output = "HDMI-A-1", mode = "1920x1080@60", position = "0x0", scale = 1 })
 
--- The one rule that makes the BenQ the MAIN screen: workspace 1 (the startup
--- workspace) lands there, so that's where you begin and where new windows go.
-hl.workspace_rule({ workspace = "1", monitor = "desc:BNQ BenQ EX2510S K8M02386019", default = true })
+-- Per-screen workspace pools (lib/pools.lua): the BenQ owns 1-5, the panel 11-15.
+-- Workspace 1 (the startup workspace) is the BenQ's default, which makes it the
+-- MAIN screen: that's where you begin. 11 is the panel's default, so it starts
+-- inside its own pool (without it Hyprland opens a free id such as 6 there).
+-- If a screen is unplugged Hyprland moves its workspaces onto the other one.
+local pools = require("lib.pools")
+local pool_monitors = { [0] = "desc:BNQ BenQ EX2510S K8M02386019", [1] = "eDP-1" }
+for pool, monitor in pairs(pool_monitors) do
+    for slot = 1, 5 do
+        local id = pools.ws_id(pool, slot)
+        hl.workspace_rule({ workspace = tostring(id), monitor = monitor, persistent = true, default = slot == 1 })
+    end
+end
 
 -- Environment ----------------------------------------------------------------
 hl.env("LIBVA_DRIVER_NAME", "nvidia")
@@ -59,39 +69,8 @@ hl.config({
 })
 
 -- Binds ----------------------------------------------------------------------
-local mainMod = "SUPER"
-local terminal = "kitty"
-local menu = "wofi --show drun"
-local jb = "/home/vyrus-extreme/.local/share/JetBrains/Toolbox/scripts/"
-
-hl.bind(mainMod .. " + T", hl.dsp.exec_cmd(terminal))
-hl.bind(mainMod .. " + Q", hl.dsp.window.close())
-hl.bind(mainMod .. " + M", hl.dsp.exec_cmd("command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || hyprctl dispatch 'hl.dsp.exit()'"))
-hl.bind(mainMod .. " + E", hl.dsp.exec_cmd(terminal .. " -e yazi"))
-hl.bind(mainMod .. " + V", hl.dsp.window.float({ action = "toggle" }))
-hl.bind(mainMod .. " + SPACE", hl.dsp.exec_cmd(menu))
-hl.bind(mainMod .. " + F", hl.dsp.exec_cmd("firefox"))
-hl.bind(mainMod .. " + C", hl.dsp.exec_cmd("code"))
-hl.bind(mainMod .. " + R", hl.dsp.exec_cmd(jb .. "rider"))
-hl.bind(mainMod .. " + I", hl.dsp.exec_cmd(jb .. "idea"))
-
--- Focus and move (arrow keys + vim). Move, not swap, so that pushing past the
--- edge of a screen carries the window onto the next monitor.
-local dirs = { left = "left", right = "right", up = "up", down = "down", H = "left", L = "right", K = "up", J = "down" }
-for key, dir in pairs(dirs) do
-    hl.bind(mainMod .. " + " .. key, hl.dsp.focus({ direction = dir }))
-    hl.bind(mainMod .. " + SHIFT + " .. key, hl.dsp.window.move({ direction = dir }))
-end
-
-for i = 1, 9 do
-    hl.bind(mainMod .. " + " .. i, hl.dsp.focus({ workspace = i }))
-    hl.bind(mainMod .. " + SHIFT + " .. i, hl.dsp.window.move({ workspace = i }))
-end
-
--- Jump focus to the other monitor
-hl.bind(mainMod .. " + Tab", hl.dsp.focus({ monitor = "+1" }))
-
-hl.bind("Print", hl.dsp.exec_cmd('grim -g "$(slurp)" ~/Pictures/screenshot_$(date +%s).png'))
+-- Every window-manager bind is in binds.lua; the hardware binds stay here.
+require("binds")
 
 -- Headless mode: tap the HP hotkey = all displays dark + mouse/keyboard power cut.
 -- Tap again to restore. locked so it still fires with the screens off.
