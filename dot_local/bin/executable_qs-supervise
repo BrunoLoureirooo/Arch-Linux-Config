@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# qs-supervise [qs args...]: run Quickshell and restart it 1 s after it exits, for any
+# reason. SIGTERM/SIGINT stop the loop: the running qs gets SIGTERM, the supervisor
+# waits for it and exits. Only ever signals its own child; never kills by name.
+# Production runs it with no arguments (qs finds ~/.config/quickshell/shell.qml).
+set -u
+
+child=""
+stopping=0
+
+on_stop() {
+    stopping=1
+    # SIGTERM for both signals: bash starts background children with SIGINT ignored.
+    [[ -n "$child" ]] && kill -TERM "$child" 2>/dev/null
+}
+trap on_stop TERM INT
+
+while :; do
+    qs "$@" &
+    child=$!
+    # `wait` returns early when a trapped signal arrives; keep waiting until qs is gone.
+    wait "$child"
+    status=$?
+    while kill -0 "$child" 2>/dev/null; do
+        wait "$child"
+    done
+    child=""
+    ((stopping)) && exit 0
+    echo "qs-supervise: qs exited (status $status), restarting in 1 s" >&2
+    sleep 1 &
+    child=$!
+    wait "$child"
+    child=""
+    ((stopping)) && exit 0
+done
