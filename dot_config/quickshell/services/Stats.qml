@@ -1,12 +1,12 @@
 pragma Singleton
 // System stats for the bar and rail (spec 5.3). One shared 2 s timer re-reads
-// /proc/stat, /proc/meminfo and the AMD GPU's gpu_busy_percent through FileViews (no
-// process spawns). The AMD card is found once at start by probing
-// /sys/class/drm/card<N>/device/vendor for 0x1002; nothing else of any other card is
-// ever read, so the NVIDIA chip (0x10de) is never woken and nvidia-smi never runs.
-// netConn comes from nmcli every 5 s (failure or no connection: ""; nmcli missing:
-// polling stops). A file that fails keeps the last good value (gpu: -1) and logs one
-// warning, not one per tick.
+// /proc/stat, /proc/meminfo, /proc/net/route and the AMD GPU's gpu_busy_percent
+// through FileViews; no process is ever spawned. The AMD card is found once at start
+// by probing /sys/class/drm/card<N>/device/vendor for 0x1002; nothing else of any
+// other card is read, so the NVIDIA chip (0x10de) is never woken and nvidia-smi never
+// runs. netConn is the interface of the default route (the render shows `wlan0`):
+// this machine runs iwd + systemd-networkd, not NetworkManager. A file that fails keeps
+// the last good value (gpu: -1) and logs one warning, not one per tick.
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -18,11 +18,12 @@ Singleton {
     property real memGb: 0     // used = MemTotal - MemAvailable, GiB
     property real memPct: 0    // 0-100
     property real gpu: -1      // 0-100, -1 when there is no readable AMD sysfs file
-    property string netConn: "" // active connection name, "" when none
+    property string netConn: "" // default-route interface, "" when there is none
 
     // Sources. Plain properties so a test config can point them elsewhere.
     property string statPath: "/proc/stat"
     property string memPath: "/proc/meminfo"
+    property string routePath: "/proc/net/route"
     property string gpuPath: ""  // set by the vendor probe below
 
     property var lastCpu: null   // {total, idle} of the previous sample
@@ -78,30 +79,23 @@ Singleton {
         return isNaN(v) ? -1 : Math.max(0, Math.min(100, v));
     }
 
-    // `nmcli -t -f NAME,TYPE connection show --active` -> first non-loopback name.
-    // Terse mode escapes ':' and '\' in values with a backslash.
-    function parseNmcli(text) {
-        for (const line of String(text).split("\n")) {
-            if (line === "")
+    // /proc/net/route -> interface of the default route: Destination 00000000 with
+    // RTF_UP (0x1) in Flags; the lowest Metric wins. "" when there is none. Lines
+    // that do not have the expected fields are skipped.
+    function parseRoute(text) {
+        let best = null;
+        for (const line of String(text).split("\n").slice(1)) {
+            const f = line.trim().split(/\s+/);
+            if (f.length < 8 || f[1] !== "00000000")
                 continue;
-            const fields = [];
-            let cur = "";
-            for (let i = 0; i < line.length; i++) {
-                const c = line[i];
-                if (c === "\\" && i + 1 < line.length) {
-                    cur += line[++i];
-                } else if (c === ":") {
-                    fields.push(cur);
-                    cur = "";
-                } else {
-                    cur += c;
-                }
-            }
-            fields.push(cur);
-            if (fields[0] !== "" && fields[1] !== "loopback")
-                return fields[0];
+            const flags = parseInt(f[3], 16);
+            const metric = Number(f[6]);
+            if (isNaN(flags) || !(flags & 1) || isNaN(metric))
+                continue;
+            if (best === null || metric < best.metric)
+                best = { iface: f[0], metric: metric };
         }
-        return "";
+        return best ? best.iface : "";
     }
 
     Timer {
@@ -113,6 +107,7 @@ Singleton {
         onTriggered: {
             statFile.reload();
             memFile.reload();
+            routeFile.reload();
             if (root.gpuPath !== "")
                 gpuFile.reload();
         }
@@ -153,6 +148,14 @@ Singleton {
     }
 
     FileView {
+        id: routeFile
+        path: root.routePath
+        printErrors: false
+        onLoaded: root.netConn = root.parseRoute(text())
+        onLoadFailed: error => root.warnOnce("route", "cannot read " + path + " (" + FileViewError.toString(error) + ")")
+    }
+
+    FileView {
         id: gpuFile
         path: root.gpuPath
         printErrors: false
@@ -188,37 +191,5 @@ Singleton {
             const card = root.probeCard;
             Qt.callLater(() => root.probeCard = card + 1);
         }
-    }
-
-    // nmcli poll. If the previous run never started (binary missing; Quickshell logs
-    // that once), polling stops instead of warning every 5 s.
-    property bool nmPending: false
-    Timer {
-        id: nmTimer
-        interval: 5000
-        running: true
-        repeat: true
-        triggeredOnStart: true
-        onTriggered: {
-            if (root.nmPending) {
-                running = false;
-                root.netConn = "";
-                root.warnOnce("nmcli", "nmcli could not be started; NET polling stopped");
-                return;
-            }
-            root.nmPending = true;
-            nmcli.running = true;
-        }
-    }
-
-    Process {
-        id: nmcli
-        command: ["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show", "--active"]
-        onStarted: root.nmPending = false
-        stdout: StdioCollector {
-            // Empty output (failure, no connection) gives "".
-            onStreamFinished: root.netConn = root.parseNmcli(text)
-        }
-        stderr: StdioCollector {} // swallowed: "NetworkManager is not running" etc.
     }
 }

@@ -1,7 +1,9 @@
 // Top bar, one per screen (spec 5.3; render classes .bar .mark .wsl .chip .m).
 // Left: λ tile, workspace slots, `//`, window title. Centre: clock and date.
-// Right: CPU, MEM, VOL, NET chips, plus BAT on non-main screens when a laptop
-// battery exists. Everything is read only (no volume or power changes).
+// Right: CPU, MEM, VOL, NET (default-route interface) chips, plus BAT whenever a
+// laptop battery exists: the same chips on every screen, so no screen topology (an
+// undocked laptop is the only, hence main, screen) can hide the battery.
+// Everything is read only (no volume or power changes).
 import QtQuick
 import Quickshell
 import Quickshell.Hyprland
@@ -34,7 +36,7 @@ PanelWindow {
     readonly property var sink: Pipewire.defaultAudioSink
     readonly property bool hasVolume: sink !== null && sink.audio !== null && sink.ready
     readonly property var battery: UPower.displayDevice
-    readonly property bool showBattery: !Screens.isMain(screen) && battery.ready && battery.isLaptopBattery
+    readonly property bool showBattery: battery.ready && battery.isLaptopBattery
 
     anchors { top: true; left: true; right: true }
     implicitHeight: 26

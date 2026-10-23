@@ -4,7 +4,7 @@
 //   qs-run.sh ipc call stats get             -> Stats values, main screen, bar slots
 //   qs-run.sh ipc call stats parse           -> results of the pure parsers on fixtures
 //   qs-run.sh ipc call stats click <screen> <slot>  -> Workspaces.focusSlot(slot) of that bar
-//   qs-run.sh ipc call stats setPaths <stat> <mem> <gpu>   -> point Stats elsewhere
+//   qs-run.sh ipc call stats setPaths <stat> <mem> <gpu> <route>  -> point Stats elsewhere
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -44,8 +44,8 @@ ShellRoot {
                 slots[p.modelData.name] = {
                     ids: w.workspaces.map(x => x.id),
                     active: w.activeId,
-                    filled: [1, 2, 3, 4, 5].filter(k => w.wsAt(k) !== null && w.wsAt(k).id === w.activeId),
-                    targets: [1, 2, 3, 4, 5].map(k => w.idFor(k))
+                    filled: w.current.filled,     // slot of the filled cell, 0 = none
+                    targets: w.current.targets    // what a click on cells 1-5 focuses
                 };
             }
             return JSON.stringify({
@@ -59,6 +59,9 @@ ShellRoot {
         function parse(): string {
             const s1 = Stats.parseStat("cpu  100 0 100 800 0 0 0 0 0 0\ncpu0 1 2 3 4\n");
             const s2 = Stats.parseStat("cpu  150 0 150 850 50 0 0 0 0 0\n");
+            const hdr = "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n";
+            const rt = (i, d, f, m) => i + "\t" + d + "\t0101A8C0\t" + f + "\t0\t0\t" + m + "\t00000000\t0\t0\t0\n";
+            const w = probes.instances[0].ws;
             return JSON.stringify({
                 stat: s1,
                 cpu: Stats.cpuPercent(s1, s2),           // busy 100 of 200 -> 50
@@ -67,9 +70,22 @@ ShellRoot {
                 mem: Stats.parseMem("MemTotal:       16000000 kB\nMemFree: 1 kB\nMemAvailable:    4000000 kB\n"),
                 memBad: Stats.parseMem("MemTotal: x\n"),  // null
                 gpu: Stats.parseGpu("17\n"), gpuBad: Stats.parseGpu(""),
-                nm: Stats.parseNmcli("lo:loopback\nHome\\:5G:802-11-wireless\nWired:802-3-ethernet\n"),
-                nmEmpty: Stats.parseNmcli(""),
-                slot: [1, 5, 11, 15, 21, 25, 6].map(id => probes.instances[0].ws.slotOf(id))
+                // /proc/net/route: default = Destination 00000000 with RTF_UP, lowest Metric
+                route: Stats.parseRoute(hdr + rt("wlan0", "00000000", "0003", 600) + rt("wlan0", "0001A8C0", "0001", 600)),
+                route2: Stats.parseRoute(hdr + rt("eth0", "00000000", "0003", 100) + rt("wlan0", "00000000", "0003", 50)
+                                         + rt("tun0", "00000000", "0002", 1)),   // tun0 not up
+                routeNone: Stats.parseRoute(hdr + rt("eth0", "0001A8C0", "0001", 100)),
+                routeBad: Stats.parseRoute("garbage\n\t\t\nwlan0 00000000\n" + hdr + "eth0\t00000000\tzz\tqq\t0\t0\tx\n"),
+                routeEmpty: Stats.parseRoute(""),
+                slot: [1, 5, 11, 15, 21, 25, 6].map(id => w.slotOf(id)),
+                // Workspaces.layout(ids on the monitor, active id) -> {base, targets, filled}
+                wsNormal: w.layout([11, 12, 13, 14, 15], 12),
+                wsMigrated: w.layout([11, 12, 13, 14, 15, 21, 22, 23, 24, 25], 23),
+                wsLeftover: w.layout([3, 13], 13),
+                wsLeftoverLow: w.layout([3, 13], 3),
+                wsActive8: w.layout([8], 8),
+                wsActive8Mixed: w.layout([8, 12], 8),
+                wsEmpty: w.layout([], -1)
             });
         }
 
@@ -80,10 +96,11 @@ ShellRoot {
                     p.ws.focusSlot(slot);
         }
 
-        function setPaths(stat: string, mem: string, gpu: string): void {
+        function setPaths(stat: string, mem: string, gpu: string, route: string): void {
             Stats.statPath = stat;
             Stats.memPath = mem;
             Stats.gpuPath = gpu;
+            Stats.routePath = route;
         }
     }
 }
