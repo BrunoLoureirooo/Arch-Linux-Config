@@ -1,0 +1,640 @@
+<title>Cyber Terminal Rice</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=VT323&family=Chakra+Petch:wght@600;700&display=swap">
+<style>
+/* layout: header strip, toolbar, BenQ (left, main) and laptop (right) as live mock screens, then plan blocks. Chamfered panels = surfaces Quickshell draws; windows keep Hyprland's rectangular gradient border. */
+:root{
+  --bg:#07070d; --panel:#0c0d16; --line:#1b1d30; --dim:#6a7399; --fg:#d7e3f0;
+  --a1:#00f0ff; --a2:#ff2e88; --warn:#ffd23f;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+  --pix:"VT323","JetBrains Mono",ui-monospace,monospace;
+  --disp:"Chakra Petch","JetBrains Mono",ui-monospace,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{
+  background:var(--bg);
+  background-image:radial-gradient(color-mix(in srgb,var(--dim) 26%,transparent) 1px,transparent 1.3px);
+  background-size:24px 24px;
+  color:var(--fg);font:400 14px/1.55 var(--mono);
+  padding-block:28px 64px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+}
+.wrap{max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:32px}
+.a1{color:var(--a1)} .a2{color:var(--a2)} .dim{color:var(--dim)}
+p{margin:0}
+a{color:var(--a1);text-underline-offset:3px}
+
+/* chamfer: outer shape = border colour, ::before = fill, both cut at the same corners */
+.ch{--c:.75em;--ci:calc(var(--c) - .42px);position:relative;isolation:isolate;background:var(--bd,var(--line));
+  clip-path:polygon(var(--c) 0,100% 0,100% calc(100% - var(--c)),calc(100% - var(--c)) 100%,0 100%,0 var(--c))}
+.ch::before{content:"";position:absolute;inset:1px;z-index:-1;background:var(--fill,var(--bg));
+  clip-path:polygon(var(--ci) 0,100% 0,100% calc(100% - var(--ci)),calc(100% - var(--ci)) 100%,0 100%,0 var(--ci))}
+.ch.hot{--bd:linear-gradient(45deg,var(--a1),var(--a2))}
+
+/* header */
+.head{display:flex;flex-wrap:wrap;gap:20px 40px;justify-content:space-between;align-items:flex-end}
+.head > div{min-width:0}
+.prompt{color:var(--dim);font-size:13px}
+h1{font:700 clamp(30px,6vw,52px)/1 var(--disp);margin:8px 0 12px;text-transform:uppercase;letter-spacing:.02em;text-wrap:balance}
+h1 span{color:var(--a2)}
+.lede{max-width:68ch}
+.status{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+.pill{border:1px solid var(--line);background:var(--panel);padding:2px 10px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);white-space:nowrap}
+.pill b{color:var(--a1);font-weight:500}
+h2{display:flex;align-items:center;gap:12px;font:600 14px/1.3 var(--disp);text-transform:uppercase;letter-spacing:.18em;color:var(--fg);margin:0 0 14px}
+h2::before{content:"//";color:var(--a2);font-family:var(--mono)}
+h2::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--line),transparent)}
+
+/* toolbar */
+.tools{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center}
+.tools .hint{flex:1 1 340px;min-width:0;color:var(--dim);font-size:12.5px}
+button{font:500 12.5px var(--mono);color:var(--fg);--c:6px;--fill:var(--panel);padding:6px 12px;border:0;cursor:pointer;border-radius:0}
+button:hover{--bd:var(--a1);color:var(--a1)}
+button:focus-visible{outline:2px solid var(--a1);outline-offset:3px}
+button[aria-pressed="true"]{--bd:var(--a2);color:var(--a2)}
+kbd{font:inherit;color:var(--a1);border:1px solid var(--line);border-bottom-width:2px;padding:0 5px;background:var(--bg)}
+
+/* monitors */
+.stage{display:grid;grid-template-columns:1fr;gap:26px}
+@media(min-width:980px){.stage{grid-template-columns:1fr 1fr}}
+.mwrap{min-width:0;display:flex;flex-direction:column;gap:8px}
+.mhead{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:11.5px;letter-spacing:.06em;color:var(--dim);text-transform:uppercase}
+.mhead b{color:var(--fg);font-weight:500}
+.mwrap.focus .mhead b{color:var(--a1)}
+.mon{container-type:inline-size;overflow-x:auto;min-width:0;padding:2px}
+.screen{
+  position:relative;aspect-ratio:16/9;overflow:hidden;cursor:pointer;
+  font-size:1.72cqw;line-height:1.35;background:var(--bg);outline:1px solid var(--line);
+}
+.mwrap.focus .screen{outline-color:var(--a1)}
+.screen:focus-visible{outline:2px solid var(--a1)}
+canvas.wp{position:absolute;inset:0;width:100%;height:100%;image-rendering:pixelated}
+.screen::after{content:"";position:absolute;inset:2.95em .45em .45em;z-index:3;pointer-events:none;opacity:.75;
+  background:
+   linear-gradient(var(--a1),var(--a1)) 0 0/1.1em 1px,linear-gradient(var(--a1),var(--a1)) 0 0/1px 1.1em,
+   linear-gradient(var(--a1),var(--a1)) 100% 0/1.1em 1px,linear-gradient(var(--a1),var(--a1)) 100% 0/1px 1.1em,
+   linear-gradient(var(--a1),var(--a1)) 0 100%/1.1em 1px,linear-gradient(var(--a1),var(--a1)) 0 100%/1px 1.1em,
+   linear-gradient(var(--a1),var(--a1)) 100% 100%/1.1em 1px,linear-gradient(var(--a1),var(--a1)) 100% 100%/1px 1.1em;
+  background-repeat:no-repeat}
+
+.screen.main::after{right:calc(22.5% + 1.35em)}
+
+/* bar */
+.bar{position:absolute;top:0;left:0;right:0;height:2.5em;display:flex;align-items:center;justify-content:space-between;gap:.8em;
+  padding:0 .7em;background:var(--bg);font-size:.84em;white-space:nowrap;overflow:hidden;z-index:4;
+  background-image:linear-gradient(var(--a1),var(--a1)),linear-gradient(var(--line),var(--line));
+  background-size:7em 1px,100% 1px;background-position:0 100%,0 100%;background-repeat:no-repeat}
+.bar .l,.bar .r,.bar .c{display:flex;gap:1em;align-items:center;min-width:0}
+.mark{--c:.5em;--bd:var(--a1);--fill:var(--a1);color:var(--bg);font-weight:700;padding:.15em .7em}
+.wsl{display:flex;gap:.2em}
+.wsl i{font-style:normal;min-width:1.8em;text-align:center;color:var(--dim);cursor:pointer;border-bottom:2px solid transparent;padding:.05em 0}
+.wsl i.occ{color:var(--fg);border-bottom-color:var(--dim)}
+.wsl i.on{background:var(--a1);color:var(--bg);font-weight:700;border-bottom-color:var(--a2)}
+.sep{color:var(--a2)}
+.ttl{color:var(--fg);overflow:hidden;text-overflow:ellipsis}
+.bar .c b{font-weight:700;letter-spacing:.04em}
+.chip{display:flex;gap:.5em;align-items:center}
+.chip em{font-style:normal;color:var(--dim);letter-spacing:.1em;font-size:.88em}
+.chip b{font-weight:500;color:var(--a1)}
+.m{display:inline-grid;grid-auto-flow:column;gap:1px}
+.m i{width:.34em;height:.85em;background:var(--line)}
+.m i.on{background:var(--a1)} .m i.hi{background:var(--warn)}
+
+/* tiled desk */
+.desk{position:absolute;top:2.95em;left:0;right:0;bottom:0;padding:.45em;display:grid;gap:.45em;z-index:1}
+.main .desk{right:calc(22.5% + .9em)}
+.desk[data-n="2"]{grid-template:1fr/1fr 1fr}
+.desk[data-n="1"]{grid-template:1fr/1fr}
+.win{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;background:var(--bg);border:1px solid var(--line)}
+.win.act{border:1px solid transparent;border-image:linear-gradient(45deg,var(--a1),var(--a2)) 1}
+.wt{display:flex;justify-content:space-between;gap:.6em;padding:.15em .7em;border-bottom:1px solid var(--line);color:var(--dim);white-space:nowrap;overflow:hidden}
+.wt span:first-child::before{content:"▍";color:var(--line);margin-right:.4em}
+.win.act .wt{color:var(--fg)}
+.win.act .wt span:first-child::before{color:var(--a1)}
+.wb{flex:1;padding:.4em 0;white-space:pre;overflow:hidden;font-size:.92em}
+.wb > *{padding:0 .7em}
+.ln{display:block;padding:0 .7em 0 0}
+.cl{background:color-mix(in srgb,var(--a1) 11%,transparent)}
+.gs{display:inline-block;width:.7em;text-align:center;color:var(--a1)}
+.gs.d{color:var(--a2)}
+.k{color:var(--a2)} .s{color:var(--a1)} .c{color:var(--dim)} .w{color:var(--warn)}
+.st{background:var(--a1);color:var(--bg);padding:0 .5em;font-weight:700}
+.st2{background:var(--line);color:var(--fg);padding:0 .5em}
+.sel{background:var(--a1);color:var(--bg)}
+.cur{display:inline-block;width:.6em;background:var(--a1);color:transparent;animation:blink 1.1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+
+/* empty workspace */
+.empty{position:absolute;top:2.95em;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;z-index:1}
+.main .empty{right:calc(22.5% + .9em)}
+.hud{--c:1em;--fill:color-mix(in srgb,var(--bg) 94%,transparent);display:flex;flex-direction:column;align-items:center;gap:.35em;padding:1em 2.2em 1.1em;text-align:center}
+.big{font:400 7.2em/.8 var(--pix);color:var(--a1)}
+.hud .tag{color:var(--fg);letter-spacing:.14em;text-transform:uppercase;font-size:.9em}
+.hud .keys{color:var(--dim);font-size:.85em}
+.hud .keys b{font-weight:500;color:var(--a1);border:1px solid var(--line);padding:0 .35em;margin:0 .1em}
+
+/* right rail (main screen only) */
+.rail{position:absolute;top:2.95em;right:.45em;bottom:.45em;width:22.5%;--c:.9em;display:flex;flex-direction:column;z-index:2;font-size:.82em}
+.rail .in{padding:.55em .8em;display:flex;flex-direction:column;gap:.5em;height:100%;overflow:hidden}
+.clk{font:400 3.7em/.8 var(--pix);color:var(--a1);display:flex;align-items:baseline;gap:.2em}
+.clk small{font:400 .3em var(--mono);color:var(--dim);letter-spacing:.1em}
+.rail .lbl{display:flex;align-items:center;gap:.6em;color:var(--dim);text-transform:uppercase;letter-spacing:.16em;font-size:.82em;margin-bottom:.15em}
+.rail .lbl::before{content:"//";color:var(--a2)}
+.rail .lbl::after{content:"";flex:1;height:1px;background:var(--line)}
+.row3{display:grid;grid-template-columns:2.4em 1fr 2.6em;gap:.5em;align-items:center}
+.row3 em{font-style:normal;color:var(--dim);letter-spacing:.08em}
+.row3 span:last-child{text-align:right}
+.sg{display:grid;grid-template-columns:repeat(10,1fr);gap:1px}
+.sg i{height:.6em;background:var(--line)}
+.sg i.on{background:var(--a1)} .sg i.hi{background:var(--warn)}
+.spw{position:relative;height:1.5em;margin-top:.2em}
+.spw svg{position:absolute;inset:0;width:100%;height:100%}
+.spw .dot{position:absolute;right:-1px;width:.35em;height:.35em;background:var(--a2);transform:translateY(-50%)}
+.netl{display:flex;justify-content:space-between;color:var(--dim);font-size:.9em}
+.netl b{color:var(--fg);font-weight:500}
+.trk{display:flex;gap:.7em;align-items:baseline;line-height:1.25}
+.trk b{font-weight:500}
+.prog{height:2px;background:var(--line);margin:.4em 0 .2em}
+.prog i{display:block;height:100%;background:var(--a1)}
+.tm{display:flex;justify-content:space-between;color:var(--dim);font-size:.9em}
+.bt{display:grid;grid-template-columns:.55em 1fr auto auto;gap:.2em .55em;align-items:center;line-height:1.3}
+.bt .dot{width:.5em;height:.5em;background:var(--a1)}
+.bt .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bt .sub{grid-column:2/-1;color:var(--dim);font-size:.9em;margin-top:-.15em}
+.rst{color:var(--dim);font-size:.9em;margin:-.15em 0 .2em 2.9em}
+.rail .lbl small{order:1;color:var(--dim);font-size:1em;letter-spacing:.04em;text-transform:none}
+.m i.lo{background:var(--warn)}
+
+/* overlays */
+.car{position:absolute;left:.45em;right:.45em;bottom:.45em;z-index:6;--c:1em;--bd:var(--a1);padding:.5em .9em .8em}
+.car .hd{display:flex;justify-content:space-between;gap:1em;color:var(--dim);margin-bottom:.55em;white-space:nowrap;overflow:hidden;letter-spacing:.06em}
+.car .hd b{color:var(--a1);font-weight:500}
+.strip{display:flex;align-items:flex-end;justify-content:center;gap:.7em}
+.strip .it{--c:.5em;width:9em;padding:1px;opacity:.6}
+.strip .it.on{--c:.8em;width:16em;opacity:1}
+.strip canvas{display:block;width:100%;aspect-ratio:16/9;image-rendering:pixelated;clip-path:inherit}
+.strip .nm{position:absolute;left:1px;bottom:1px;background:var(--bg);color:var(--fg);padding:0 .6em;font-size:.85em}
+.strip .ix{position:absolute;right:1px;top:1px;background:var(--a1);color:var(--bg);padding:0 .5em;font-size:.8em;font-weight:700}
+.car .ft{display:flex;justify-content:space-between;align-items:center;margin-top:.6em;color:var(--dim)}
+.sw{display:flex;gap:.3em;align-items:center}
+.sw i{width:1.5em;height:.8em;display:inline-block;outline:1px solid var(--line)}
+.pg{display:flex;gap:.25em}
+.pg i{width:1.6em;height:2px;background:var(--line)}
+.pg i.on{background:var(--a1)}
+.run{position:absolute;z-index:6;left:50%;top:18%;transform:translateX(-50%);width:36em;--c:1em;--bd:var(--a1);padding:.2em 0 .5em}
+.run .q{display:flex;justify-content:space-between;padding:.45em 1em;border-bottom:1px solid var(--line)}
+.run .q span:last-child{color:var(--dim)}
+.run .row{display:flex;gap:.8em;align-items:center;padding:.12em 1em;color:var(--dim)}
+.run .row .ic{color:var(--a1)}
+.run .row .gap{flex:1}
+.run .row.on{background:var(--a1);color:var(--bg)}
+.run .row.on .ic{color:var(--bg)}
+.run .row.on .gap::after{content:"⏎"}
+.run .cap{padding:.35em 1em .1em;color:var(--dim);letter-spacing:.14em;font-size:.85em;text-transform:uppercase}
+.toast{position:absolute;z-index:5;bottom:.9em;right:.9em;--c:.8em;--bd:var(--a2);padding:.4em 1em .5em;white-space:pre;min-width:19em}
+.main .toast{right:calc(22.5% + 1.4em)}
+.toast .tl{display:flex;justify-content:space-between;gap:1.5em;color:var(--dim);font-size:.85em;letter-spacing:.1em;text-transform:uppercase}
+.toast .tl b{color:var(--a2);font-weight:700}
+.toast .tb{height:2px;background:var(--line);margin-top:.35em}
+.toast .tb i{display:block;width:62%;height:100%;background:var(--a2)}
+
+/* workspace-switch tear: a one-shot overlay of snapshots, only alive for ~250 ms. In Quickshell this is a ShaderEffect over a screen capture. */
+.gx{position:absolute;inset:0;z-index:30;pointer-events:none;overflow:hidden;background:var(--bg)}
+.gg{position:absolute;inset:0}
+.gl{position:absolute;inset:0;background:var(--bg);overflow:hidden}
+.gl.ghR{filter:url(#fxR);mix-blend-mode:screen}
+.gl.ghC{filter:url(#fxC);mix-blend-mode:screen}
+.gl.band.iv{filter:invert(1) hue-rotate(180deg)}
+.gl.band.tR{filter:url(#fxR)}
+.gl.band.tC{filter:url(#fxC)}
+.gsrc{position:absolute;inset:0}
+.gb{position:absolute;display:block}
+.gb.iv{background:#fff;mix-blend-mode:difference}
+.gb.p1{background:var(--a1)}
+.gb.p2{background:var(--a2)}
+.gb.nz{background-size:144px 36px;image-rendering:pixelated}
+@media(prefers-reduced-motion:reduce){.cur{animation:none}}
+
+/* controls under each screen */
+.mctl{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+.mctl .grp{display:flex;gap:6px;align-items:center}
+.note{font-size:12px;color:var(--dim);max-width:95ch}
+
+/* plan blocks */
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:30px 48px}
+.card{position:relative;border-top:1px solid var(--line);padding:16px 0 0;min-width:0}
+.card::before{content:"";position:absolute;top:-1px;left:0;width:3.5em;height:1px;background:var(--a1)}
+.card ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:9px}
+.card li{padding-left:1.4em;position:relative}
+.card li::before{content:">";position:absolute;left:0;color:var(--a2)}
+.card li.u{background:color-mix(in srgb,var(--warn) 9%,transparent);padding:.55em .9em .55em 2.5em}
+.card li.u::before{content:"?";color:var(--warn);left:.9em;top:.55em;font-weight:700}
+.card code{color:var(--a1)}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:420px;font-size:12.5px}
+th,td{text-align:left;padding:6px 12px 6px 0;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--dim);font-weight:500;text-transform:uppercase;letter-spacing:.12em;font-size:11px}
+td:first-child{color:var(--a1);white-space:nowrap}
+.cmp{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:12.5px}
+.cmp b{color:var(--a1);font-weight:500}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <filter id="fxR" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0"/></filter>
+  <filter id="fxC" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0"/></filter>
+</defs></svg>
+<div class="wrap">
+  <header class="head">
+    <div>
+      <p class="prompt"><span class="a1">vyrus@arch</span>:<span class="a2">~/.config</span>$ rice --preview --no-install</p>
+      <h1>Cyber Terminal <span>Rice</span></h1>
+      <p class="lede">A mock of the planned Quickshell desktop on your two screens: the BenQ on the left, the laptop panel on the right. Nothing is installed or changed. Everything shown is drawn by Quickshell or Hyprland with blur, shadows and easing still off. Wallpapers and values here are stand-ins.</p>
+    </div>
+    <div class="status" aria-label="Preview status">
+      <span class="pill">palette <b id="pName">neon-rain</b></span>
+      <span class="pill">displays <b>2</b></span>
+      <span class="pill">pools <b>2 × 5</b></span>
+      <span class="pill">anim <b>off</b></span>
+    </div>
+  </header>
+
+  <section>
+    <div class="tools" role="toolbar" aria-label="Preview controls">
+      <button class="ch" id="bCar" type="button" aria-pressed="false"><kbd>W</kbd> wallpapers</button>
+      <button class="ch" id="bRun" type="button" aria-pressed="false"><kbd>Space</kbd> launcher</button>
+      <button class="ch" id="bToast" type="button" aria-pressed="true"><kbd>N</kbd> notification</button>
+      <button class="ch" id="bGl" type="button" aria-pressed="true"><kbd>G</kbd> glitch on switch</button>
+      <p class="hint">Click a screen to focus it. <kbd>1</kbd>–<kbd>5</kbd> jump workspace, <kbd>←</kbd><kbd>→</kbd> step (the mouse side buttons), <kbd>Tab</kbd> switch screen. Each screen keeps its own 1–5.</p>
+    </div>
+  </section>
+
+  <section class="stage" id="stage" aria-label="Mock desktop on two monitors"></section>
+
+  <p class="note">Pick a wallpaper and everything recolours: wallpaper, bar, rail, window borders and the page itself. On the real setup matugen writes the palette and Quickshell, kitty, btop and Hyprland reload from it. The cut corners are Quickshell surfaces (bar tile, rail, launcher, notifications, carousel). Hyprland cannot cut window corners, so windows keep its 1px gradient border, set by <code>col.active_border</code>.</p>
+
+  <section>
+    <h2>Polish, and what it costs</h2>
+    <div class="grid">
+      <div class="card">
+        <div class="tw"><table>
+          <thead><tr><th>Device</th><th>Where</th><th>Idle cost</th></tr></thead>
+          <tbody>
+            <tr><td>Cut-corner panels</td><td>rail, launcher, toasts, carousel</td><td>none; drawn once</td></tr>
+            <tr><td>Segmented stat meters</td><td>bar chips, rail</td><td>repaint on the 2 s stats tick</td></tr>
+            <tr><td>Workspace badge with occupancy</td><td>bar</td><td>repaint on workspace event</td></tr>
+            <tr><td>Corner brackets</td><td>each screen, click-through</td><td>none; optional</td></tr>
+            <tr><td>Dithered wallpaper</td><td>baked into the image</td><td>none</td></tr>
+            <tr><td>Glitch on workspace switch</td><td>~250 ms shader pass over a snapshot of the screen, on the top overlay layer above every window</td><td>none at rest; GPU only for those 250 ms; off by default</td></tr>
+            <tr><td>Wallpaper-driven palette</td><td>everything</td><td>runs only when you pick a wallpaper</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div class="card">
+        <ul>
+          <li><b class="a1">Borrowed from</b> the cyberpunk Hyprland shells I looked at: <a href="https://github.com/ARCANGEL0/Cyberpunk-Hyprland">CyberArch</a> (HUD stat bars labelled like game meters, a level-style workspace badge, angled frames, one hot accent on a dark base, and a <code>glitch.frag</code> shader on workspace switch, which the tear here imitates), <a href="https://github.com/kalashnikxvxiii/cybershell-dotfiles">cybershell</a> and <a href="https://github.com/caelestia-dots/shell">Caelestia</a> (one palette object read by every component, generated from the wallpaper, modular dashboard cards).</li>
+          <li><b class="a1">Left out on purpose:</b> always-running shaders, GIF assets, audio visualizers, minimap, market feed, sound effects and window-title patches. Each one adds idle CPU or memory, which goes against the terminal-lightweight rule.</li>
+          <li class="u">I could only read their README text, not the screenshots. If you saw one of these rices and liked a specific part, say which and I will match it.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Rail widgets and where their data comes from</h2>
+    <div class="grid">
+      <div class="card tw">
+        <table>
+          <thead><tr><th>Widget</th><th>Source</th><th>Catch</th></tr></thead>
+          <tbody>
+            <tr><td>Bluetooth</td><td>Quickshell's Bluetooth module (BlueZ over D-Bus): name, connected, battery</td><td>shows connected devices only; AirPods left/right/case may need librepods, which you already run</td></tr>
+            <tr><td>Claude limits</td><td>The Claude Code status line receives the 5-hour and weekly percent used plus reset times; a small command writes them to a cache file that Quickshell watches</td><td>only updates while a Claude Code session is running, so the widget shows how old the numbers are</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <ul>
+          <li>You have no status line configured in Claude Code today, so the plan adds one. It reads usage numbers only; it never touches your login token. The unofficial usage endpoint some tools use needs that token, so I am not using it.</li>
+          <li class="u">Unverified: whether your plan reports the limits at all. An open upstream issue (<a href="https://github.com/anthropics/claude-code/issues/45133">#45133</a>) says they went missing from the status line input on some setups. The numbers in the mock are made up. If they are not available, the widget is replaced by a plain device list.</li>
+          <li class="u">Your paired devices are the DualSense, AirPods Pro and JBL TUNE760NC; none are connected right now, so the two shown here are an example state.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Workspaces: one pool per screen</h2>
+    <div class="grid">
+      <div class="card">
+        <ul>
+          <li>BenQ and laptop each get their own 1–5. Switching on one screen never touches the other, like Spaces on the Mac.</li>
+          <li>Mechanism: a short function in Hyprland's Lua config, no plugin. The BenQ owns workspaces 1–5 and the laptop panel owns 11–15; the keys always act on the screen you are on.</li>
+          <li>Your mouse is a Logitech G502 Hero. Its back/forward side buttons become previous/next workspace on the focused screen, as on the Mac. They stop doing back/forward in browsers.</li>
+          <li class="u">Unverified: the exact button codes (expected <code>mouse:275</code>/<code>276</code>) and that a bind on a bare mouse button works as written. Both get checked first, before anything else is built on them.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="cmp">
+          <span class="dim">now</span><span>9 shared workspaces, <code>Super+1–9</code></span>
+          <span class="dim">after</span><span><b>5 per screen</b>: <code>Ctrl+1–5</code> jumps (as on the Mac), <code>Ctrl+Alt+←/→</code> and the mouse side buttons step</span>
+          <span class="dim">move window</span><span><code>Ctrl+Shift+1–5</code>; <code>Super+Alt+Shift+arrows</code> pushes a window past an edge to the other screen</span>
+          <span class="dim">focus</span><span><code>Super+Alt+←↑↓→</code> or <code>hjkl</code>; <code>Super+`</code> jumps screen</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Keymap: macOS muscle memory</h2>
+    <div class="grid">
+      <div class="card tw">
+        <table>
+          <thead><tr><th>Mac</th><th>Here</th><th>How</th></tr></thead>
+          <tbody>
+            <tr><td>⌘C ⌘V ⌘X ⌘A ⌘Z ⌘F ⌘S ⌘L</td><td>Super + same key</td><td>sent as Ctrl + key in GUI apps</td></tr>
+            <tr><td>⌘T ⌘W ⌘N ⌘R</td><td>Super + same key</td><td>tab / window / reload in apps</td></tr>
+            <tr><td>same keys in a terminal</td><td>Super + same key</td><td>kitty copy/paste/tab/window; raw Ctrl stays raw, so <code>Ctrl+C</code> is still SIGINT</td></tr>
+            <tr><td>⌥← ⌥→ ⌥⌫</td><td>Alt + same key</td><td>sent as Ctrl + key in GUI apps (word jump, word delete); terminals handle Alt themselves</td></tr>
+            <tr><td>⌘← ⌘→</td><td>Super + ← →</td><td>line start and end (Home, End)</td></tr>
+            <tr><td>⌘Space</td><td>Super+Space</td><td>Quickshell launcher</td></tr>
+            <tr><td>⌘Q</td><td>Super+Q</td><td>close window</td></tr>
+            <tr><td>⌘Tab</td><td>Super+Tab</td><td>cycle windows on this screen</td></tr>
+            <tr><td>⌃1–5</td><td>Ctrl + 1–5</td><td>jump to workspace on this screen</td></tr>
+            <tr><td>⌃← ⌃→</td><td>Ctrl+Alt + ← →</td><td>step workspace on this screen (also the mouse side buttons)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <ul>
+          <li>The remap tool is <code>xremap</code> (AUR, Hyprland build). It matches on the focused app, so terminals can be treated differently. A global Super→Ctrl swap (keyd, or the XKB swap) would break Ctrl+C and Ctrl+W in kitty, so I am not using it.</li>
+          <li>A translated key press re-enters the compositor, so no workspace or window bind may equal a translated output. That is why stepping is <code>Ctrl+Alt+←/→</code> and window focus is <code>Super+Alt+arrows</code>. A test checks the two files for overlap.</li>
+          <li>Your current app binds (<code>Super+T/F/C/E/R/I</code>) collide with these. They move to <code>Ctrl+Alt+T/F/C/E/R/I</code>, plus the launcher. This is a proposal; any row is easy to flip.</li>
+          <li class="u">Unverified: xremap-hypr-bin builds and starts cleanly on this machine (one report of a slow start after login), and JetBrains and Electron apps pick up the remapped keys.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Stack and budget</h2>
+    <div class="grid">
+      <div class="card">
+        <ul>
+          <li><b class="a1">Quickshell 0.3.1</b> (official repo) replaces waybar, wofi, mako and hyprpaper with one QML process: a bar on each screen, the right rail on the main screen, launcher, notification server, wallpaper layer and the carousel.</li>
+          <li><b class="a1">matugen 4.2.0</b> (official repo) turns the picked wallpaper into a palette file. No swww/awww is needed because Quickshell draws the wallpaper itself, which also fixes the BenQ having none today.</li>
+          <li><b class="a1">kitty</b> gets a real config (it has none now), with the palette included from matugen's output. btop, nvim and Hyprland borders follow the same file.</li>
+          <li><b class="a1">Hyprland</b> moves from the stub <code>hyprland.conf</code> to the Lua config that 0.56 ships, since that is the supported format on 0.56 and it lets the per-screen pools be a short function. Your lid, headless and monitor logic carry over unchanged.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="cmp">
+          <span class="dim">measured now</span><span>waybar 79 MB + mako 24 MB + hyprpaper 53 MB = <b>156 MB</b></span>
+          <span class="dim">budget</span><span>Quickshell, all of it, at or under <b>156 MB</b> and low single-digit idle CPU</span>
+          <span class="dim">rule</span><span>Measure after each step. If the budget is blown, the fallback is keeping waybar and mako and using Quickshell only for the carousel and launcher.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Order of work</h2>
+    <div class="grid">
+      <div class="card">
+        <ul>
+          <li><b class="a1">1.</b> Back up configs (same <code>.bak</code> pattern as now). Install quickshell, matugen, xremap-hypr-bin, wev. Confirm the mouse button codes.</li>
+          <li><b class="a1">2.</b> Lua config, per-screen workspaces and the new keymap. waybar keeps running. Test binds with fake input through uinput, then on the real keyboard and mouse.</li>
+          <li><b class="a1">3.</b> Quickshell bar, rail and wallpaper layer on both screens. Retire waybar and hyprpaper. The Claude-limits widget needs a status line command added to your Claude Code settings; I will ask before touching that file.</li>
+          <li><b class="a1">4.</b> Launcher and notifications. Retire wofi and mako.</li>
+          <li><b class="a1">5.</b> Carousel, matugen pipeline, kitty/btop/nvim theming.</li>
+          <li><b class="a1">6.</b> Verify with grim screenshots, memory against the 156 MB budget, and a pass through every bind. Update the workspace note in memory.</li>
+          <li>The full spec and a 24-task plan are in the dotfiles repo under <code>docs/superpowers/</code>, on the branch <code>worktree-quickshell-rice-spec</code>.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <ul>
+          <li class="u">Missing input: both r/unixporn links were the subreddit front page, and Reddit blocks my fetcher, so the exact rice you liked is not in this render. Send the post link or a screenshot and I will match it.</li>
+          <li class="u">The right rail on the main screen now holds clock, system, media, Bluetooth and Claude limits. Tell me if anything else belongs there, or if the laptop screen should get one too.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+const PAL=[
+ {n:'neon-rain', bg:'#07070d',panel:'#0c0d16',line:'#1b1d30',dim:'#6a7399',fg:'#d7e3f0',a1:'#00f0ff',a2:'#ff2e88',warn:'#ffd23f'},
+ {n:'amber-crt', bg:'#0b0803',panel:'#130e05',line:'#2e220c',dim:'#9a7a35',fg:'#ffe3a3',a1:'#ffb000',a2:'#ff6a00',warn:'#fff27a'},
+ {n:'toxic-grid',bg:'#050a06',panel:'#09120b',line:'#14261a',dim:'#5aa061',fg:'#cfeccf',a1:'#39ff14',a2:'#e0ff00',warn:'#ffb000'},
+ {n:'ice-void',  bg:'#06090f',panel:'#0a1019',line:'#18213a',dim:'#7886b0',fg:'#dbe7ff',a1:'#7df9ff',a2:'#b388ff',warn:'#ffd23f'},
+ {n:'blood-moon',bg:'#0d0507',panel:'#16080b',line:'#32121a',dim:'#a8627a',fg:'#f3d6da',a1:'#ff2a4d',a2:'#ffb347',warn:'#ffe066'}
+];
+const M=[
+ {id:'DP-1',name:'BenQ EX2510S',role:'main',main:true,ws:1,sets:{1:['nvim','term'],2:['web'],3:['btop','yazi'],4:[],5:[]}},
+ {id:'eDP-1',name:'laptop panel',role:'built-in',main:false,ws:3,sets:{1:['web','term'],2:['yazi'],3:[],4:[],5:[]}}
+];
+let pi=0, ci=0, focus=0, car=false, run=false, toast=true, glx=true;
+
+/* colour + wallpaper */
+function applyPal(p){const s=document.documentElement.style;['bg','panel','line','dim','fg','a1','a2','warn'].forEach(k=>s.setProperty('--'+k,p[k]))}
+const hex=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16));
+const mix=(a,b,t)=>{const x=hex(a),y=hex(b);return 'rgb('+x.map((v,i)=>Math.round(v+(y[i]-v)*t)).join(',')+')'};
+function rng(s){return()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function paint(cv,p,seed){
+  const w=192,h=108;cv.width=w;cv.height=h;const g=cv.getContext('2d'),r=rng(seed);
+  /* dithered sky: bands with checkerboard strips between them */
+  const B=12,col=b=>{const t=b/(B-1);return t<.7?mix(p.bg,mix(p.bg,p.a2,.34),t/.7):mix(mix(p.bg,p.a2,.34),mix(p.bg,p.a1,.26),(t-.7)/.3)};
+  for(let b=0;b<B;b++){const y0=Math.floor(b*h/B),y1=Math.floor((b+1)*h/B);g.fillStyle=col(b);g.fillRect(0,y0,w,y1-y0);
+    if(b<B-1){g.fillStyle=col(b+1);for(let y=y1-2;y<y1;y++)for(let x=(y&1);x<w;x+=2)g.fillRect(x,y,1,1)}}
+  g.fillStyle=p.fg;g.globalAlpha=.55;for(let i=0;i<22;i++)g.fillRect(Math.floor(r()*w),Math.floor(r()*h*.4),1,1);g.globalAlpha=1;
+  const mx=w*(.2+r()*.55),my=h*.4,mr=h*(.17+r()*.07);
+  g.fillStyle=p.a2;g.beginPath();g.arc(mx,my,mr,0,7);g.fill();
+  g.fillStyle=mix(p.bg,p.a2,.34);for(let y=my;y<my+mr;y+=3)g.fillRect(mx-mr,y,mr*2,1+(y-my)/mr*1.3);
+  [[p.a2,.14],[p.a1,.1],[p.bg,0]].forEach(([c,m],L)=>{
+    let x=-2;const fill=L<2?mix(p.bg,c,m):p.bg;
+    while(x<w){const bw=5+Math.floor(r()*10),bh=h*(.16+r()*.3)*(1-L*.18)+L*4;
+      g.fillStyle=fill;g.fillRect(x,h-bh,bw,bh);
+      if(L==1&&r()<.18){g.fillStyle=p.a1;g.fillRect(x+1,h-bh-5,1,5)}
+      if(L>0){g.fillStyle=L==1?p.a2:p.a1;for(let wy=h-bh+3;wy<h-2;wy+=4)for(let wx=x+1;wx<x+bw-1;wx+=3)if(r()<.16)g.fillRect(wx,wy,1,1)}
+      if(L==2&&r()<.22&&bw>7){g.fillStyle=r()<.5?p.a1:p.a2;g.fillRect(x+1,h-bh+4,bw-2,1);g.fillRect(x+1,h-bh+8,2,1)}
+      x+=bw}
+  });
+  g.globalAlpha=.26;g.strokeStyle=p.a1;for(let i=0;i<46;i++){const x=r()*w,y=r()*h;g.beginPath();g.moveTo(x,y);g.lineTo(x-2,y+7);g.stroke()}
+  g.globalAlpha=1;
+}
+const cur=()=>car?ci:pi;
+
+/* live values */
+const live={cpu:23,gpu:17,mem:3.1,net:Array.from({length:24},(_,i)=>2+Math.round(3+3*Math.sin(i/2.3)))};
+const meter=(v,n,hiAt=75)=>{const f=Math.round(v/100*n);return '<span class="m">'+Array.from({length:n},(_,k)=>`<i class="${k<f?(v>hiAt?'hi':'on'):''}"></i>`).join('')+'</span>'};
+const seg=(v)=>'<span class="sg">'+Array.from({length:10},(_,k)=>`<i class="${k<Math.round(v/10)?(v>75?'hi':'on'):''}"></i>`).join('')+'</span>';
+const blk=(v,n)=>{const f=Math.round(v/100*n);return '█'.repeat(f)+'░'.repeat(n-f)};
+function sysHTML(){
+  const row=(l,v,t)=>`<div class="row3"><em>${l}</em>${seg(v)}<span>${t}</span></div>`;
+  const a=live.net,w=100,h=22,st=w/(a.length-1),pts=a.map((v,i)=>[+(i*st).toFixed(1),+(h-2-v/8*(h-5)).toFixed(1)]),d=pts.map(p=>p.join(',')).join(' ');
+  return row('CPU',live.cpu,Math.round(live.cpu)+'%')+row('MEM',live.mem/16*100,live.mem.toFixed(1)+'G')+row('GPU',live.gpu,Math.round(live.gpu)+'%')+
+   `<div class="spw"><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polygon points="0,${h} ${d} ${w},${h}" fill="var(--a1)" opacity=".14"/><polyline points="${d}" fill="none" stroke="var(--a1)" stroke-width="1.2" vector-effect="non-scaling-stroke"/></svg><span class="dot" style="top:${(pts[pts.length-1][1]/h*100).toFixed(0)}%"></span></div>
+    <div class="netl"><span>▲ <b>1.2M</b></span><span>wlan0</span><span>▼ <b>4.1M</b></span></div>`}
+function btopText(){
+  return `<span class="c">cpu</span> <span class="s">${blk(live.cpu*1.4,12)}</span> ${Math.round(live.cpu*1.4)}%\n<span class="c">mem</span> <span class="s">${blk(live.mem/16*100,12)}</span> ${live.mem.toFixed(1)}G\n<span class="c">gpu</span> <span class="s">${blk(live.gpu,12)}</span> ${Math.round(live.gpu)}%\n<span class="c">────────────────────────────</span>\n<span class="c"> pid   cmd           cpu%</span>\n  812  Hyprland       2.1\n  940  quickshell     0.6\n 1204  kitty          0.4\n 1377  firefox        3.8`}
+const bat=v=>'<span class="m">'+Array.from({length:5},(_,k)=>`<i class="${k<Math.round(v/20)?(v<=20?'lo':'on'):''}"></i>`).join('')+'</span>';
+const BT=[{n:'AirPods Pro',b:82,s:'L 84 · R 80 · case 61'},{n:'DualSense',b:41,s:''}];
+const CL=[{l:'5H',v:38,t:'resets in 2h 14m'},{l:'7D',v:19,t:'resets Mon 09:00'}];
+const btHTML=()=>BT.map(d=>`<div class="bt"><i class="dot"></i><span class="nm">${d.n}</span>${bat(d.b)}<span>${d.b}%</span>${d.s?`<span class="sub">${d.s}</span>`:''}</div>`).join('');
+const clHTML=()=>CL.map(c=>`<div class="row3"><em>${c.l}</em>${seg(c.v)}<span>${c.v}%</span></div><div class="rst">${c.t}</div>`).join('');
+const pad=n=>String(n).padStart(2,'0');
+const now=()=>{const d=new Date();return {hm:pad(d.getHours())+':'+pad(d.getMinutes()),dd:d.toLocaleDateString('en',{weekday:'short',day:'2-digit',month:'short'}).replace(/,/g,'').toUpperCase(),
+  date:d.toLocaleDateString('en',{weekday:'short',day:'2-digit',month:'short',year:'numeric'}).replace(/,/g,'').toUpperCase()}};
+
+/* window bodies */
+function code(lines,hl){return lines.map((l,i)=>{
+  let [a,cm]=esc(l).split('//');a=a.replace(/\b(import|true|false)\b/g,'<span class="k">$1</span>').replace(/\b([A-Z][A-Za-z]+)(?= \{)/g,'<span class="s">$1</span>');
+  const sign=[4,5].includes(i)?'<span class="gs">▎</span>':(i==6?'<span class="gs d">▎</span>':'<span class="gs"> </span>');
+  return `<span class="ln ${i+1==hl?'cl':''}">${sign}<span class="c">${String(i+1).padStart(2)}</span> ${a}${cm!==undefined?'<span class="c">//'+cm+'</span>':''}</span>`}).join('')}
+const WIN={
+ nvim:()=>({t:'nvim',r:'Bar.qml',b:code(['import Quickshell','import Quickshell.Hyprland','','PanelWindow {','  implicitHeight: 22','  color: Theme.bg','  // one pool per screen','  Workspaces {','    screen: modelData','  }','}'],8)+'\n<span class="ln"><span class="st">NORMAL</span><span class="st2">main</span> <span class="c">Bar.qml        8:3</span></span>'}),
+ term:()=>({t:'kitty',r:'~/.config/quickshell',b:`<span class="s">quickshell</span> <span class="a2">main</span> <span class="w">±2</span>\n<span class="a2">❯</span> git log --oneline -3\n<span class="s">a41f9c2</span> per-screen workspaces\n<span class="s">7be03d1</span> carousel: hard snap\n<span class="s">c0d88e4</span> kitty: cmd+c / cmd+v\n<span class="s">quickshell</span> <span class="a2">main</span> <span class="w">±2</span>\n<span class="a2">❯</span> <span class="cur">_</span>`}),
+ btop:()=>({t:'btop',r:'q to quit',b:'<span data-live="btop">'+btopText()+'</span>'}),
+ yazi:()=>({t:'yazi',r:'~/Pictures/wallpapers',b:PAL.map((p,i)=>(i==cur()?`<span class="sel">${('▌'+p.n+'.png').padEnd(22)}</span>`:` ${p.n}.png`)).join('\n')+`\n<span class="c">${cur()+1}/${PAL.length}</span>`}),
+ web:()=>({t:'firefox',r:'wiki.hypr.land',b:`<span class="c"> Binds · Hyprland Wiki          [+]</span>\n <span class="s">https://wiki.hypr.land/Configuring/</span>\n <span class="c">────────────────────────────────</span>\n <span class="a2">#</span> Binds\n\n Forward a key combo to a window\n with <span class="s">sendshortcut</span>, or match the\n focused app before sending it.`})
+};
+
+function screenHTML(m,i){
+  const set=m.sets[m.ws], n=now(), act=focus==i;
+  const wsl=[1,2,3,4,5].map(k=>`<i class="${k==m.ws?'on':(m.sets[k].length?'occ':'')}" data-m="${i}" data-ws="${k}">${k}</i>`).join('');
+  const first=set[0]?WIN[set[0]]():null;
+  const wins=set.map((k,j)=>{const w=WIN[k]();return `<div class="win ${act&&j==0?'act':''}"><div class="wt"><span>${w.t}</span><span>${w.r}</span></div><div class="wb">${w.b}</div></div>`}).join('');
+  let h=`<canvas class="wp" data-wp></canvas>
+  <div class="bar"><div class="l"><span class="ch mark">λ</span><div class="wsl">${wsl}</div><span class="sep">//</span><span class="ttl">${first?esc(first.t):'empty'}</span></div>
+   <div class="c"><b data-live="bclk">${n.hm}</b><span class="dim">${n.dd}</span></div>
+   <div class="r"><span class="chip"><em>CPU</em>${meter(live.cpu*2,5)}<b data-live="bcpu">${Math.round(live.cpu)}%</b></span><span class="chip"><em>MEM</em><b>${live.mem.toFixed(1)}G</b></span><span class="chip"><em>VOL</em>${meter(40,5)}</span>${m.main?'<span class="chip"><em>NET</em><b>wlan0</b></span>':'<span class="chip"><em>BAT</em>'+meter(87,5)+'<b>87%</b></span>'}</div></div>`;
+  h+= set.length?`<div class="desk" data-n="${set.length}">${wins}</div>`
+    :`<div class="empty"><div class="hud ch hot"><div class="big" data-live="clk">${n.hm}</div><div class="tag">${m.id} · workspace ${m.ws} · empty</div><div class="keys"><b>1</b>–<b>5</b> workspace <b>W</b> wallpapers <b>␣</b> launch</div></div></div>`;
+  if(m.main) h+=`<aside class="rail ch hot"><div class="in">
+   <div><div class="clk"><span data-live="clk">${n.hm}</span><small>WEST</small></div><div class="dim" data-live="date">${n.date}</div></div>
+   <div><div class="lbl">sys</div><div data-live="sys">${sysHTML()}</div></div>
+   <div><div class="lbl">media</div><div class="trk"><b>Venger</b><span class="dim">Perturbator</span></div><div class="prog"><i style="width:19%"></i></div><div class="tm"><span>0:48</span><span>4:12</span></div></div>
+   <div><div class="lbl">bluetooth<small>${BT.length} connected</small></div>${btHTML()}</div>
+   <div><div class="lbl">claude<small>2m ago</small></div>${clHTML()}</div></div></aside>`;
+  if(toast&&m.main) h+=`<div class="toast ch"><div class="tl"><b>[!] quickshell</b><span>${n.hm}</span></div>shell reloaded in 0.4s<div class="tb"><i></i></div></div>`;
+  if(car&&act){
+    const idx=[-2,-1,0,1,2].map(d=>(ci+d+PAL.length)%PAL.length);
+    h+=`<div class="car ch"><div class="hd"><span>WALLPAPER // <b>${PAL[ci].n}.png</b></span><span>1920×1080 · png · ←/→ select · ⏎ apply · esc cancel</span></div>
+      <div class="strip">${idx.map((k,j)=>`<div class="it ch ${j==2?'on hot':''}"><canvas data-th="${k}"></canvas>${j==2?`<span class="nm">${PAL[k].n}</span><span class="ix">${pad(k+1)}</span>`:''}</div>`).join('')}</div>
+      <div class="ft"><span class="sw">PALETTE ${['bg','a1','a2','fg','dim','warn'].map(c=>`<i style="background:${PAL[ci][c]}"></i>`).join('')}</span><span class="pg">${PAL.map((_,k)=>`<i class="${k==ci?'on':''}"></i>`).join('')}</span></div></div>`;
+  }
+  if(run&&act) h+=`<div class="run ch"><div class="q"><span><span class="a2">❯</span> fir<span class="cur">_</span></span><span>4 / 312</span></div>
+    <div class="cap">applications</div>
+    <div class="row on"><span class="ic">[ff]</span><span>firefox</span><span class="gap"></span><span>web browser</span></div>
+    <div class="row"><span class="ic">[fd]</span><span>firefox developer edition</span><span class="gap"></span><span>web</span></div>
+    <div class="row"><span class="ic">[fs]</span><span>fish</span><span class="gap"></span><span>shell</span></div>
+    <div class="row"><span class="ic">[fg]</span><span>figma-linux</span><span class="gap"></span><span>design</span></div></div>`;
+  return h;
+}
+
+function build(){
+  $('#stage').innerHTML=M.map((m,i)=>`<div class="mwrap ${m.main?'main':''}" id="w${i}">
+    <div class="mhead"><span><b>${m.id}</b> · ${m.name} · 1920×1080@144</span><span>${m.role} · pool 1–5</span></div>
+    <div class="mon"><div class="screen ${m.main?'main':''}" id="s${i}" tabindex="0" role="group" aria-label="${m.name} screen"></div></div>
+    <div class="mctl"><span class="note" id="n${i}"></span>
+      <span class="grp"><button class="ch" type="button" data-step="-1" data-m="${i}">◀ mouse4</button><button class="ch" type="button" data-step="1" data-m="${i}">mouse5 ▶</button></span></div></div>`).join('');
+}
+function render(){
+  const p=PAL[cur()];applyPal(p);$('#pName').textContent=p.n;
+  M.forEach((m,i)=>{
+    $('#w'+i).classList.toggle('focus',focus==i);
+    $('#s'+i).innerHTML=screenHTML(m,i);
+    $('#n'+i).textContent=`workspace ${m.ws} of 5 on this screen`;
+  });
+  $$('canvas[data-wp]').forEach(c=>paint(c,p,cur()*7+3));
+  $$('canvas[data-th]').forEach(c=>{const k=+c.dataset.th;paint(c,PAL[k],k*7+3)});
+  $('#bCar').setAttribute('aria-pressed',car);$('#bRun').setAttribute('aria-pressed',run);$('#bToast').setAttribute('aria-pressed',toast);$('#bGl').setAttribute('aria-pressed',glx);
+}
+/* tear: snapshot old and new screen content, then flip through a few staccato frames of displaced bands, channel-split ghosts and corrupted blocks */
+const calm=matchMedia('(prefers-reduced-motion: reduce)');
+const FR=[['o',1.2,0,0],['o',6,1,3],['o',13,2.6,8],['n',10,3,10],['n',4.5,1.2,4],['n',1.4,.45,0]];
+let gxTimer=0,gxEl=null;
+function dup(node){const c=node.cloneNode(true),a=$$('canvas',node),b=$$('canvas',c);b.forEach((x,k)=>{x.width=a[k].width;x.height=a[k].height;x.getContext('2d').drawImage(a[k],0,0)});return c}
+function snap(s){const w=document.createElement('div');w.className='gsrc';[...s.children].forEach(c=>{if(!c.classList.contains('gx'))w.appendChild(dup(c))});return w}
+function noiseURL(){const c=document.createElement('canvas');c.width=48;c.height=12;const g=c.getContext('2d'),p=PAL[cur()],cols=[p.a1,p.a2,p.fg,p.bg,p.bg];
+  for(let y=0;y<12;y++)for(let x=0;x<48;x++){g.fillStyle=cols[Math.floor(Math.random()*cols.length)];g.fillRect(x,y,1,1)}return c.toDataURL()}
+function endTear(){clearTimeout(gxTimer);if(gxEl){gxEl.remove();gxEl=null}}
+function tear(s,oldSnap,newSnap){
+  endTear();
+  const gx=gxEl=document.createElement('div');gx.className='gx';
+  const cuts=[0,...Array.from({length:8},()=>Math.random()*100).sort((a,b)=>a-b),100];
+  const grp={};
+  [['o',oldSnap],['n',newSnap]].forEach(([k,src])=>{
+    const g=document.createElement('div');g.className='gg';g.hidden=true;
+    const layer=(cls,clip)=>{const l=document.createElement('div');l.className='gl '+cls;if(clip)l.style.clipPath=clip;l.appendChild(dup(src));g.appendChild(l);return l};
+    layer('base');
+    const bands=cuts.slice(0,-1).map((t,i)=>layer('band',`inset(${t}% 0 ${100-cuts[i+1]}% 0)`));
+    const R=layer('ghR'),C=layer('ghC');
+    grp[k]={g,bands,R,C};gx.appendChild(g)});
+  const nz=noiseURL(),blocks=document.createElement('div');gx.appendChild(blocks);
+  s.appendChild(gx);
+  let k=0;
+  const step=()=>{
+    if(k>=FR.length){endTear();return}
+    const [src,amp,gh,nb]=FR[k];
+    grp.o.g.hidden=src!=='o';grp.n.g.hidden=src!=='n';
+    const g=grp[src];
+    g.bands.forEach(b=>{const on=Math.random()<.85,sm=on&&Math.random()<.3?1+Math.random()*.1*amp/4:1,slip=on&&amp>3&&Math.random()<.2?((Math.random()-.5)*6).toFixed(2):0,v=Math.random();
+      b.classList.remove('iv','tR','tC');if(amp>3){if(v<.22)b.classList.add('iv');else if(v<.36)b.classList.add('tR');else if(v<.5)b.classList.add('tC')}
+      b.style.transform=on?`translate(${((Math.random()-.5)*2*amp).toFixed(2)}em,${slip}em) scaleX(${sm.toFixed(3)})`:'none'});
+    [g.R,g.C].forEach((l,i)=>{l.hidden=gh==0;l.style.transform=`translateX(${(i?gh:-gh)}em)`});
+    blocks.innerHTML=Array.from({length:nb},()=>{const w=8+Math.random()*32,h=1.4+Math.random()*4.2,v=Math.random();
+      const bar=v>.62,ww=bar?40+Math.random()*60:w,hh=bar?.8+Math.random()*1.8:h;
+      return `<i class="gb ${v<.3?'iv':(v<.45?'p1':(v<.62?'p2':'nz'))}" style="left:${(Math.random()*(100-ww)).toFixed(1)}%;top:${(Math.random()*92).toFixed(1)}%;width:${ww.toFixed(1)}%;height:${hh.toFixed(2)}em${bar?`;background-image:url(${nz})`:''}"></i>`}).join('');
+    k++;gxTimer=setTimeout(step,42)};
+  step();
+}
+const setWs=(i,k)=>{
+  const nk=Math.max(1,Math.min(5,k)),ch=nk!=M[i].ws,s=$('#s'+i),use=ch&&glx&&!calm.matches;
+  const old=use?snap(s):null;
+  M[i].ws=nk;render();
+  if(use)tear(s,old,snap(s))};
+const setFocus=i=>{focus=i;render()};
+const toggleCar=()=>{car=!car;run=false;if(car)ci=pi;render()};
+const toggleRun=()=>{run=!run;car=false;ci=pi;render()};
+const closeCar=ok=>{if(ok)pi=ci;car=false;render()};
+
+$('#stage').addEventListener('click',e=>{
+  const w=e.target.closest('[data-ws]'),s=e.target.closest('[data-step]'),sc=e.target.closest('.screen');
+  if(w){focus=+w.dataset.m;setWs(+w.dataset.m,+w.dataset.ws);return}
+  if(s){focus=+s.dataset.m;setWs(+s.dataset.m,M[+s.dataset.m].ws+ +s.dataset.step);return}
+  if(sc){setFocus(+sc.id.slice(1))}
+});
+const bl=()=>document.activeElement&&document.activeElement.blur();
+$('#bCar').onclick=()=>{toggleCar();bl()};
+$('#bRun').onclick=()=>{toggleRun();bl()};
+$('#bToast').onclick=()=>{toast=!toast;render();bl()};
+$('#bGl').onclick=()=>{glx=!glx;render();bl()};
+document.addEventListener('keydown',e=>{
+  if(e.metaKey||e.altKey||e.ctrlKey)return;const k=e.key;
+  if(car){
+    if(k==='ArrowRight'){ci=(ci+1)%PAL.length;render()}else if(k==='ArrowLeft'){ci=(ci+PAL.length-1)%PAL.length;render()}
+    else if(k==='Enter')closeCar(true);else if(k==='Escape')closeCar(false);else if(k==='w'||k==='W')closeCar(false);else return;
+    e.preventDefault();return}
+  if(run&&(k==='Escape'||k===' ')){run=false;render();e.preventDefault();return}
+  if(/^[1-5]$/.test(k))setWs(focus,+k);
+  else if(k==='ArrowRight')setWs(focus,M[focus].ws+1);else if(k==='ArrowLeft')setWs(focus,M[focus].ws-1);
+  else if(k==='Tab')setFocus((focus+1)%M.length);
+  else if(k==='w'||k==='W')toggleCar();else if(k===' ')toggleRun();
+  else if(k==='n'||k==='N'){toast=!toast;render()}
+  else if(k==='g'||k==='G'){glx=!glx;render()}
+  else return;
+  e.preventDefault();
+});
+
+function tick(){
+  live.cpu=Math.max(6,Math.min(48,live.cpu+(Math.random()-.5)*9));live.gpu=Math.max(4,Math.min(40,live.gpu+(Math.random()-.5)*6));
+  live.net=live.net.slice(1).concat(Math.max(1,Math.min(8,live.net[live.net.length-1]+Math.round((Math.random()-.5)*4))));
+  const n=now(),set=(k,v,html)=>$$(`[data-live="${k}"]`).forEach(el=>html?el.innerHTML=v:el.textContent=v);
+  set('sys',sysHTML(),1);set('btop',btopText(),1);set('bcpu',Math.round(live.cpu)+'%');set('bclk',n.hm);set('clk',n.hm);set('date',n.date);
+}
+build();render();setInterval(tick,1600);
+</script>
