@@ -106,6 +106,16 @@ ShellRoot {
                 Chip { label: "BAT"; meter: 87; text: "87%" }
                 Chip { label: "GPU"; meter: 92; text: "92%" }
             }
+
+            // Chip passthrough (invert, warnAbove) and the bar's smaller px.
+            Row {
+                spacing: 18
+                Chip { label: "BAT inv"; meter: 87; text: "87%"; invert: true }
+                Chip { label: "BAT inv"; meter: 15; text: "15%"; invert: true }
+                Chip { label: "VOL warn>100"; meter: 90; warnAbove: 100 }
+                Chip { label: "px10 CPU"; meter: 46; text: "23%"; px: 10 }
+                Chip { label: "px10 BAT"; meter: 87; text: "87%"; invert: true; px: 10 }
+            }
         }
     }
 
