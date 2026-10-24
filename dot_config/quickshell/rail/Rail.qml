@@ -11,6 +11,10 @@
 // the rig). So the visible rail ignores zones (always exactly below the bar, never
 // shortens it), and a separate 1 px transparent, input-less surface on the overlay
 // layer, which is arranged after the top layer, reserves the width.
+// Deploy note: that overlay surface sits above fullscreen windows on the main monitor.
+// It is 1 px, transparent and takes no input, but if render:direct_scanout is enabled
+// in Hyprland, any overlay-layer surface may keep a fullscreen window on the main
+// monitor from being scanned out directly (the other monitor is unaffected).
 import QtQuick
 import QtQuick.Layouts
 import Quickshell

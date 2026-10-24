@@ -1,4 +1,5 @@
-// Rail MEDIA section (render .trk .prog .tm): the first MPRIS player's title (bold)
+// Rail MEDIA section (render .trk .prog .tm): the first playing MPRIS player (else the
+// first player): title (bold)
 // and artist (dim) on one line, a 2px progress bar and `m:ss` / `m:ss`. Hidden when
 // there is no player. Read only: no controls, no seeking. MprisPlayer.position does
 // not update by itself; a 1 s timer re-reads it (emits positionChanged) only while
@@ -12,8 +13,10 @@ ColumnLayout {
     id: root
 
     property real px: Theme.px
-    readonly property var player: Mpris.players.values.length > 0 ? Mpris.players.values[0] : null
-    readonly property bool hasLength: player !== null && player.lengthSupported && player.length > 0
+    readonly property var player: Mpris.players.values.find(p => p.isPlaying) ?? Mpris.players.values[0] ?? null
+    readonly property real position: player ? (player.position || 0) : 0  // NaN-safe
+    readonly property real length: player ? (player.length || 0) : 0
+    readonly property bool hasLength: player !== null && player.lengthSupported && length > 0
 
     // seconds -> m:ss
     function clock(s) {
@@ -76,7 +79,7 @@ ColumnLayout {
 
         Rectangle {
             height: parent.height
-            width: root.hasLength ? Math.round(parent.width * Math.max(0, Math.min(1, root.player.position / root.player.length))) : 0
+            width: root.hasLength ? Math.round(parent.width * Math.max(0, Math.min(1, root.position / root.length))) : 0
             color: Theme.a1
         }
     }
@@ -87,7 +90,7 @@ ColumnLayout {
 
         Text {
             id: pos
-            text: root.player ? root.clock(root.player.position) : ""
+            text: root.player ? root.clock(root.position) : ""
             color: Theme.dim
             font.family: Theme.font
             font.pixelSize: Math.round(root.px * 0.9)
@@ -95,7 +98,7 @@ ColumnLayout {
 
         Text {
             anchors.right: parent.right
-            text: root.hasLength ? root.clock(root.player.length) : "-:--"
+            text: root.hasLength ? root.clock(root.length) : "-:--"
             color: Theme.dim
             font.family: Theme.font
             font.pixelSize: Math.round(root.px * 0.9)

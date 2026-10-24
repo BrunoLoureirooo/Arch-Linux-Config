@@ -7,6 +7,8 @@
 //   qs-run.sh ipc call rail parse          -> pure functions on fixtures
 //   qs-run.sh ipc call rail setNetDevPath <path>
 //   qs-run.sh ipc call rail setGpuPath <path>
+//   qs-run.sh ipc call rail preview <path> / clearPreview   -> WallpaperState preview
+//   qs-run.sh ipc call rail setReady <true|false>           -> WallpaperState.ready
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -116,6 +118,7 @@ ShellRoot {
                 wallpaper: {
                     path: WallpaperState.path, defaultPath: WallpaperState.defaultPath,
                     filePath: WallpaperState.filePath, statePath: WallpaperState.statePath,
+                    previewPath: WallpaperState.previewPath, ready: WallpaperState.ready,
                     verdict: WallpaperState.verdict, verdictPath: WallpaperState.verdictPath,
                     images: images
                 },
@@ -162,6 +165,19 @@ ShellRoot {
 
         function setGpuPath(path: string): void {
             Stats.gpuPath = path;
+        }
+
+        function preview(path: string): void {
+            WallpaperState.preview(path);
+        }
+
+        function clearPreview(): void {
+            WallpaperState.clearPreview();
+        }
+
+        // Simulates "state file not read yet" (the startup window) for the gate check.
+        function setReady(ready: bool): void {
+            WallpaperState.ready = ready;
         }
     }
 }

@@ -330,7 +330,10 @@ bad=$("$R/qs-run.sh" log | grep -E 'ERROR|WARN' | grep -v -e 'Failed to register
 "$R/nested-hypr.sh" start "$R/full.lua" >/dev/null
 { read -r bus_addr; read -r bus_pid; } < <(dbus-daemon --session --fork --nopidfile --print-address=1 --print-pid=1)
 [[ -n "$bus_addr" && "$bus_pid" =~ ^[0-9]+$ ]] || fail "private dbus-daemon"
-staged=$(DBUS_SESSION_BUS_ADDRESS="$bus_addr" "$R/qs-run.sh" start --restage --entry "$R/rail.qml")
+# rice.wallpaper info lines ("loading <url> on <screen>") are off in production; on
+# here so the checks can see which images were ever loaded.
+start6() { DBUS_SESSION_BUS_ADDRESS="$bus_addr" QT_LOGGING_RULES='rice.wallpaper.info=true' "$R/qs-run.sh" start "$@"; }
+staged=$(start6 --restage --entry "$R/rail.qml")
 qs_pid=$("$R/qs-run.sh" status | sed -n 's/^running: pid=\([0-9]*\) .*/\1/p')
 sleep 3
 rget() { "$R/qs-run.sh" ipc call rail get; }
@@ -430,6 +433,74 @@ echo "  RSS before ${rss0} kB, after the 8000x8000 image ${rss1} kB"
     || { fail "huge image"; echo "  $w"; }
 put_state "{\"path\": \"$pics/wall0.png\"}"
 
+# k. Carousel preview: shown on both screens without writing the state file; a bad
+#    preview falls back with exactly one warning and clearPreview recovers; a state-file
+#    change during a preview waits until clearPreview.
+mkpng() {
+    python3 -I - "$1" "$2" "$3" <<'PY'
+import struct, sys, zlib
+f, w, h = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+row = b"\x00" + (b"\xff\x2e\x88" * 16 + b"\x07\x07\x0d" * 16) * (w // 32) + b"\x07\x07\x0d" * (w % 32)
+c = zlib.compressobj(1)
+data = b"".join(c.compress(row) for _ in range(h)) + c.flush()
+ck = lambda t, d: struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+open(f, "wb").write(b"\x89PNG\r\n\x1a\n" + ck(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+                    + ck(b"IDAT", data) + ck(b"IEND", b""))
+PY
+}
+mkpng "$pics/fhd.png" 1920 1080
+mkpng "$pics/hd.png" 1280 720
+# True once both screens show <file> decoded (status Ready).
+both_show() {
+    local _
+    for _ in $(seq 40); do
+        sleep 0.25
+        [[ "$(rj "all(i['status'] == 1 and i['source'].endswith('/$1') for i in d['wallpaper']['images'].values())")" == True ]] \
+            && return 0
+    done
+    return 1
+}
+both_show wall0.png || fail "wall0 not shown before the preview checks"
+# Gate: while the state is not ready (the startup window before the state file is
+# read), a path change loads nothing; it loads as soon as the state is ready.
+"$R/qs-run.sh" ipc call rail setReady false
+"$R/qs-run.sh" ipc call rail preview "$pics/hd.png"
+sleep 1.5
+gated=$(rj "[i['source'].split('/')[-1] for i in d['wallpaper']['images'].values()]")
+"$R/qs-run.sh" ipc call rail setReady true
+[[ "$gated" == "['wall0.png', 'wall0.png']" ]] && both_show hd.png \
+    && pass "nothing loads before the state is ready (still $gated), then both screens load" \
+    || { fail "ready gate (while not ready: $gated)"; rget; }
+"$R/qs-run.sh" ipc call rail clearPreview
+both_show wall0.png || fail "wall0 not back after the gate check"
+sum0=$(sha256sum "$state")
+"$R/qs-run.sh" ipc call rail preview "$pics/fhd.png"
+both_show fhd.png && [[ "$(rj "d['wallpaper']['path']")" == "$pics/fhd.png" \
+    && "$(rj "d['wallpaper']['filePath']")" == "$pics/wall0.png" && "$(sha256sum "$state")" == "$sum0" ]] \
+    && pass "preview(fhd.png): both screens show it, state file unchanged" || { fail "preview"; rget; }
+"$R/qs-run.sh" ipc call rail clearPreview
+both_show wall0.png && [[ "$(rj "d['wallpaper']['path']")" == "$pics/wall0.png" ]] \
+    && pass "clearPreview: both screens back on the state file's image" || { fail "clearPreview"; rget; }
+n0=$(logn)
+"$R/qs-run.sh" ipc call rail preview "$pics/notes.txt"
+sleep 2
+w=$(rget)
+echo "$w" | spy "'ok' if d['wallpaper']['verdictPath'] == '$pics/notes.txt' and d['wallpaper']['verdict'] == -1 and d['wallpaper']['images']['DP-1']['status'] == 3 and d['wallpaper']['images']['eDP-1']['source'] == '' else d" | grep -qx ok \
+    && [[ "$(warns_since "$n0" | grep -c .)" == 1 ]] \
+    && pass "preview of a text file: background colour, exactly one warning" || { fail "bad preview"; echo "  $w"; warns_since "$n0"; }
+"$R/qs-run.sh" ipc call rail clearPreview
+both_show wall0.png && pass "clearPreview after a bad preview: both screens recover" || { fail "recover after bad preview"; rget; }
+"$R/qs-run.sh" ipc call rail preview "$pics/fhd.png"
+both_show fhd.png || fail "second preview not shown"
+put_state "{\"path\": \"$pics/hd.png\"}"
+sleep 2
+[[ "$(rj "d['wallpaper']['filePath']")" == "$pics/hd.png" && "$(rj "d['wallpaper']['path']")" == "$pics/fhd.png" ]] && both_show fhd.png \
+    && pass "state-file change during a preview: recorded, the preview stays on screen" || { fail "state change during preview"; rget; }
+"$R/qs-run.sh" ipc call rail clearPreview
+both_show hd.png && pass "clearPreview: the new state-file image (hd.png) appears on both screens" || { fail "state after clearPreview"; rget; }
+put_state "{\"path\": \"$pics/wall0.png\"}"
+both_show wall0.png || fail "wall0 not restored after the preview checks"
+
 # g. The rail: one instance, on the main screen, below the bar; its width reserved.
 [[ "$(rj "d['railScreens']")" == "['DP-1']" && "$(rj "d['main']")" == "['DP-1']" ]] \
     && pass "rail instance only on the main screen (DP-1)" || fail "rail screens: $(rj "d['railScreens']")"
@@ -505,10 +576,15 @@ for _ in $(seq 20); do sleep 0.3; [[ "$(rj "d['media']['visible']")" == False ]]
 # j. Net sampling: the history grows on the shared timer and the sparkline draws it; an
 #    unreadable /proc/net/dev freezes it with one warning and no QML error.
 n_a=$(rj "d['net']['n']")
+last_a=$(rj "d['net']['last']")
 sleep 4.2
 n_b=$(rj "d['net']['n']")
-[[ "$n_b" -gt "$n_a" && "$n_b" -le 24 && "$(rj "d['spark']['n']")" == "$n_b" ]] \
-    && pass "netHistory grows ($n_a -> $n_b samples), the sparkline draws all of them" || fail "net history $n_a -> $n_b"
+last_b=$(rj "d['net']['last']")
+# The history saturates at 24 samples; then a new sample shows as a changed last value.
+{ [[ "$n_b" -gt "$n_a" ]] || [[ "$n_a" == 24 && "$n_b" == 24 && "$last_b" != "$last_a" ]]; } \
+    && [[ "$n_b" -le 24 && "$(rj "d['spark']['n']")" == "$n_b" ]] \
+    && pass "netHistory grows ($n_a -> $n_b samples, last $last_a -> $last_b), the sparkline draws all of them" \
+    || fail "net history $n_a -> $n_b (last $last_a -> $last_b)"
 gpu_vis=$(rj "d['gpuRow']")
 n0=$(logn)
 "$R/qs-run.sh" ipc call rail setNetDevPath "$unread"
@@ -525,6 +601,31 @@ w=$(rget)
 bad=$("$R/qs-run.sh" log | grep -E 'ERROR|WARN' | grep -v -e 'host portal' -e 'Stats: cannot read' -e 'QML Image' \
     -e 'Wallpaper:.*cannot parse' || true)
 [[ -z "$bad" ]] && pass "qs log: no other ERROR/WARN in section 6" || { fail "qs log section 6"; echo "$bad"; }
+
+# m. Startup with a state file already present: the default image is never touched.
+#    Positive control first: with the default present and no state file, the default is
+#    loaded (so the "loading" line and the .jpg-named PNG both work).
+loads() { "$R/qs-run.sh" log | grep -c "rice.wallpaper: loading .*/Pictures/$1 on" || true; }
+"$R/qs-run.sh" stop >/dev/null
+rm -f "$pics/berserk-wallpaper.jpg"
+put_state "{\"path\": \"$pics/wall0.png\"}"
+start6 --entry "$R/rail.qml" >/dev/null
+both_show wall0.png && sleep 1 && [[ "$("$R/qs-run.sh" log | grep -c 'QML Image')" == 0 && "$(loads berserk-wallpaper.jpg)" == 0 ]] \
+    && pass "start with a valid state file, default missing: no QML Image warning, default never loaded" \
+    || { fail "startup race (default missing)"; "$R/qs-run.sh" log | grep -e 'QML Image' -e 'rice.wallpaper' || true; }
+"$R/qs-run.sh" stop >/dev/null
+cp "$pics/fhd.png" "$pics/berserk-wallpaper.jpg"
+rm -f "$state"
+start6 --entry "$R/rail.qml" >/dev/null
+both_show berserk-wallpaper.jpg && [[ "$(loads berserk-wallpaper.jpg)" -ge 1 ]] \
+    && pass "positive control: no state file, default present: the default is loaded ($(loads berserk-wallpaper.jpg) load lines)" \
+    || { fail "default positive control"; "$R/qs-run.sh" log | grep 'rice.wallpaper' || true; }
+"$R/qs-run.sh" stop >/dev/null
+put_state "{\"path\": \"$pics/wall0.png\"}"
+start6 --entry "$R/rail.qml" >/dev/null
+both_show wall0.png && sleep 1 && [[ "$(loads berserk-wallpaper.jpg)" == 0 && "$(loads wall0.png)" -ge 1 ]] \
+    && pass "start with a valid state file, default present: the default is never decoded (0 load lines)" \
+    || { fail "startup race (default present)"; "$R/qs-run.sh" log | grep 'rice.wallpaper' || true; }
 "$R/qs-run.sh" stop >/dev/null
 kill -TERM "$bus_pid" 2>/dev/null || true
 bus_pid=""
