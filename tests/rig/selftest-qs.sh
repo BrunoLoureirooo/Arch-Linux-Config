@@ -18,7 +18,11 @@
 #   7. toasts (through tests/rig/toasts.qml, on a private bus with no service
 #      activation): one toast and its 5 s expiry, three at once with the rest queued, the
 #      sender's own timeout, a critical toast that stays until a real pointer click,
-#      long and empty texts, nothing left at idle.
+#      long and empty texts, nothing left at idle;
+#   8. launcher (through tests/rig/launcher.qml, XDG_DATA_DIRS with fake .desktop files
+#      only): open/close, filter, selection keys, Enter runs the entry (a marker file),
+#      Escape, clicks, zero matches, rapid toggles, focused screen, keyboard focus back
+#      to the previous window.
 # Every qs this script starts runs on a private session bus (qs-run.sh starts its own
 # when none is given), so the shell's NotificationServer never meets the live mako.
 # Needs no running rig (starts and stops its own). Screenshots land in
@@ -37,7 +41,9 @@ kitty_pid=""
 fake_pid=""
 bus_pid=""
 sup_bus_pid=""
+holder_pid=""
 cleanup() {
+    [[ -z "$holder_pid" ]] || kill -TERM "$holder_pid" 2>/dev/null || true
     [[ -z "$sup_pid" ]] || kill -TERM "$sup_pid" 2>/dev/null || true
     [[ -z "$kitty_pid" ]] || kill -TERM "$kitty_pid" 2>/dev/null || true
     [[ -z "$fake_pid" ]] || kill -TERM "$fake_pid" 2>/dev/null || true
@@ -68,6 +74,7 @@ for f in .config/quickshell/shell.qml .config/quickshell/Theme.qml .config/quick
     .config/quickshell/rail/Rail.qml .config/quickshell/rail/ClockWidget.qml \
     .config/quickshell/rail/SysWidget.qml .config/quickshell/rail/MediaWidget.qml \
     .config/quickshell/rail/SectionLabel.qml .config/quickshell/notifications/Toasts.qml \
+    .config/quickshell/launcher/Launcher.qml \
     .local/share/rice/palette.py; do
     [[ -s "$st/$f" ]] || { ok=0; echo "  missing $f"; }
 done
@@ -117,8 +124,8 @@ owner=$(DBUS_SESSION_BUS_ADDRESS="$qs_bus" busctl --user --no-pager --no-legend 
 [[ -n "$qs_bus" && "$qs_bus" != *"path=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/bus"* && "$owner" == "$qs_pid" ]] \
     && pass "shell.qml owns org.freedesktop.Notifications on a private bus only ($qs_bus)" \
     || fail "notification server bus: '$qs_bus', owner '$owner'"
-idle=$("$R/run.sh" hyprctl layers | grep -c -e 'namespace: rice-toasts' || true)
-[[ "$idle" == 0 ]] && pass "idle: no toast surface exists" || fail "idle surfaces: $idle"
+idle=$("$R/run.sh" hyprctl layers | grep -c -e 'namespace: rice-toasts' -e 'namespace: rice-launcher' || true)
+[[ "$idle" == 0 ]] && pass "idle: no toast or launcher surface exists" || fail "idle surfaces: $idle"
 layers=$("$R/run.sh" hyprctl layers | grep -c 'namespace: rice-bar' || true)
 [[ "$layers" -eq 2 ]] && pass "bar on both outputs (2 rice-bar layers)" || fail "rice-bar layers: $layers"
 walls=$("$R/run.sh" hyprctl layers | grep -c 'namespace: rice-wallpaper' || true)
@@ -764,6 +771,155 @@ sleep 0.3
 [[ -z "$(warns_since "$n0")" ]] && pass "qs log: no ERROR/WARN in section 7" || { fail "qs log section 7"; warns_since "$n0"; }
 "$R/qs-run.sh" stop >/dev/null
 
+# --- 8. launcher --------------------------------------------------------------------------
+# Only fake desktop entries are visible (XDG_DATA_DIRS = a temp dir; the staged
+# XDG_DATA_HOME has no applications dir). Their Exec writes a marker file; no real
+# application is ever started. A long-lived virtual keyboard keeps the seat's keyboard
+# capability up between keys.sh calls: without any keyboard, each short wtype run makes
+# the seat drop and re-add its keyboard, and Qt then ignores the re-created keyboard
+# (seen in the rig; a real seat always has its keyboard).
+apps="$tmp/apps"
+markers="$tmp/markers"
+mkdir -p "$apps/applications" "$markers"
+mkdesk() { # file name generic keywords marker [extra line]
+    printf '[Desktop Entry]\nType=Application\nName=%s\nGenericName=%s\nKeywords=%s\nExec=sh -c "echo %s > %s/%s"\n%s\n' \
+        "$2" "$3" "$4" "$5" "$markers" "$5" "${6:-}" >"$apps/applications/$1.desktop"
+}
+mkdesk rig-alpha "Rig Test Alpha" "Alpha Tool" "alpha;" alpha
+mkdesk rig-beta "Rig Test Beta" "Beta Tool" "beta;" beta
+mkdesk firefox-fake "Firefox Fake" "Web Browser" "internet;" firefox
+mkdesk rig-hidden "Rig Hidden Entry" "Hidden" "" hidden "NoDisplay=true"
+for i in 01 02 03 04 05 06 07 08 09 10; do mkdesk "rig-many-$i" "Rig Many $i" "Filler" "" "many$i"; done
+"$R/run.sh" wtype -s 900000 >/dev/null 2>&1 &
+holder_pid=$!
+XDG_DATA_DIRS="$apps" "$R/qs-run.sh" start --entry "$R/launcher.qml" >/dev/null
+lbus=$("$R/qs-run.sh" status | sed -n 's/.* bus=\([^ ]*\).*/\1/p')
+lj() { "$R/qs-run.sh" ipc call launcherprobe get | spy "$1"; }
+K() { "$R/keys.sh" "$@"; sleep 0.3; }
+toggle() { "$R/qs-run.sh" ipc call launcher toggle; sleep 0.4; }
+aw() { H activewindow -j | spy "d.get('address')"; }
+markers_now() { (cd "$markers" && ls) | tr '\n' ' '; }
+n0=$(logn)
+
+want='{"fir":["Firefox","Thunar"],"FIR":["Firefox","Thunar"],"f":["Firefox","Fish","LibreOffice","Thunar"],'
+want+='"all":["Alacritty","Firefox","Fish","LibreOffice","Thunar","Zed"],"none":[],"inter":["Firefox"],"spaces":["Fish"],'
+want+='"tags":["[fi]","[vi]","[x ]","[  ]"]}'
+got=$("$R/qs-run.sh" ipc call launcherprobe parse)
+[[ "$got" == "$want" ]] && pass "launcher filter (rank, case, keywords, trim) and tags on fixtures" \
+    || { fail "launcher fixtures"; echo "  got  $got"; echo "  want $want"; }
+
+# A real kitty on the focused DP-1 holds the keyboard focus before the launcher opens.
+H dispatch 'hl.dsp.focus({ monitor = "DP-1" })' >/dev/null
+"$R/run.sh" env HOME="$staged" XDG_CONFIG_HOME="$staged/.config" XDG_CACHE_HOME="$staged/.cache" \
+    XDG_STATE_HOME="$staged/.local/state" XDG_DATA_HOME="$staged/.local/share" \
+    DBUS_SESSION_BUS_ADDRESS="$lbus" kitty --config=NONE --title rig-kitty >"$tmp/kitty8.out" 2>&1 </dev/null &
+kitty_pid=$!
+for _ in $(seq 30); do sleep 0.3; [[ "$(H activewindow -j | spy "d.get('title')")" == rig-kitty ]] && break; done
+aw0=$(aw)
+
+# a. Closed: nothing exists. Open: one full-screen overlay on DP-1, only the fake entries
+#    (NoDisplay hidden), 8 rows of 13, the query field focused.
+[[ "$(lj "d['open'] or d['window']")" == False && -z "$(layer_xywh rice-launcher)" ]] \
+    && pass "launcher closed: no window, no surface" || fail "launcher at start: $(lj d)"
+toggle
+fakes="['Firefox Fake', 'Rig Many 01', 'Rig Many 02', 'Rig Many 03', 'Rig Many 04', 'Rig Many 05', 'Rig Many 06', 'Rig Many 07', 'Rig Many 08', 'Rig Many 09', 'Rig Many 10', 'Rig Test Alpha', 'Rig Test Beta']"
+[[ ! -e "$staged/.local/share/applications" && "$(lj "d['allNames']")" == "$fakes" \
+    && "$(lj "(d['count'], d['total'], len(d['rows']), d['inputFocus'], d['screen'])")" == "(13, 13, 8, True, 'DP-1')" \
+    && "$(layer_xywh rice-launcher)" == "DP-1 0 0 1920 1080" ]] \
+    && pass "toggle opens on DP-1 (full-screen overlay); only the 13 fake entries, 8 rows shown, query focused" \
+    || fail "launcher open: $(lj d) layer '$(layer_xywh rice-launcher)'"
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-launcher-DP-1.png" >/dev/null
+
+# b. Filtering: by name, by keyword.
+K fir
+[[ "$(lj "(d['query'], d['rows'], d['count'])")" == "('fir', ['Firefox Fake'], 1)" ]] \
+    && pass "typing 'fir' filters to Firefox Fake (1 / 13)" || fail "fir: $(lj d)"
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-launcher-fir-DP-1.png" >/dev/null
+K -k BackSpace -k BackSpace -k BackSpace
+K internet
+[[ "$(lj "d['rows']")" == "['Firefox Fake']" ]] && pass "keyword 'internet' finds Firefox Fake" || fail "keyword: $(lj d)"
+
+# c. Selection keys, clamped to the shown rows.
+for _ in 1 2 3 4 5 6 7 8; do "$R/keys.sh" -k BackSpace; done
+K rig
+sel=$(lj "(d['count'], len(d['rows']), d['selected'])")
+K -k Down -k Down; s_dd=$(lj "d['selected']")
+K -k Up; s_u=$(lj "d['selected']")
+K -M ctrl -k n -m ctrl; s_n=$(lj "d['selected']")
+K -M ctrl -k p -k p -k p -m ctrl; s_p=$(lj "d['selected']")
+for _ in $(seq 12); do "$R/keys.sh" -k Down; done
+sleep 0.3
+s_end=$(lj "d['selected']")
+[[ "$sel" == "(12, 8, 0)" && "$s_dd" == 2 && "$s_u" == 1 && "$s_n" == 2 && "$s_p" == 0 && "$s_end" == 7 ]] \
+    && pass "'rig': 12 matches capped at 8 rows; Down Down 2, Up 1, Ctrl+N 2, Ctrl+P x3 0, Down x12 stops at 7" \
+    || fail "selection: $sel dd $s_dd u $s_u n $s_n p $s_p end $s_end"
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-launcher-sel-DP-1.png" >/dev/null
+
+# d. Escape closes and gives the keyboard back to the kitty; reopening starts clean.
+K -k Escape
+[[ "$(lj "d['open'] or d['window']")" == False && -z "$(layer_xywh rice-launcher)" && "$(aw)" == "$aw0" ]] \
+    && pass "Escape closes; the kitty ($aw0) is the active window again" || fail "Escape: $(lj d), active $(aw)"
+toggle
+[[ "$(lj "(d['query'], d['selected'], d['count'])")" == "('', 0, 13)" ]] \
+    && pass "reopening clears the query and the selection" || fail "reopen: $(lj d)"
+
+# e. Enter runs the selected entry (its Exec writes a marker) and closes.
+K fir
+K -k Return
+sleep 0.7
+[[ "$(lj "d['open']")" == False && "$(markers_now)" == "firefox " && "$(cat "$markers/firefox")" == firefox \
+    && "$(aw)" == "$aw0" ]] \
+    && pass "Enter on Firefox Fake ran its Exec (marker 'firefox') and closed; focus back on the kitty" \
+    || fail "Enter: open $(lj "d['open']"), markers '$(markers_now)', active $(aw)"
+
+# f. Zero matches: empty list; Enter does nothing.
+toggle
+K zzzq
+z1=$(lj "(d['rows'], d['count'])")
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-launcher-zero-DP-1.png" >/dev/null
+K -k Return
+[[ "$z1" == "([], 0)" && "$(lj "d['open']")" == True && "$(markers_now)" == "firefox " ]] \
+    && pass "zero matches: empty list; Enter runs nothing and keeps it open" || fail "zero matches: $z1, open $(lj "d['open']"), markers '$(markers_now)'"
+
+# g. Real pointer clicks: inside the card keeps it open, outside closes.
+"$R/run.sh" python3 -I "$R/vpointer.py" 900 230 >/dev/null
+sleep 0.4
+in_open=$(lj "d['open']")
+"$R/run.sh" python3 -I "$R/vpointer.py" 300 800 >/dev/null
+sleep 0.4
+[[ "$in_open" == True && "$(lj "d['open']")" == False && "$(aw)" == "$aw0" ]] \
+    && pass "click inside the card keeps it open; click outside closes it" || fail "clicks: inside $in_open, after outside $(lj "d['open']")"
+
+# h. Three toggles at once end open, with exactly one window.
+"$R/qs-run.sh" ipc call launcher toggle &
+t1=$!
+"$R/qs-run.sh" ipc call launcher toggle &
+t2=$!
+"$R/qs-run.sh" ipc call launcher toggle &
+t3=$!
+wait "$t1" "$t2" "$t3" || true
+sleep 0.5
+[[ "$(lj "d['open']")" == True && "$("$R/qs-run.sh" ipc call launcherprobe windows)" == 1 \
+    && "$(H layers | grep -c 'namespace: rice-launcher')" == 1 ]] \
+    && pass "three quick toggles: open, one window, one surface" || fail "rapid toggles: $(lj d), $(H layers | grep -c 'namespace: rice-launcher') surfaces"
+K -k Escape
+
+# i. The focused screen decides where it opens.
+H dispatch 'hl.dsp.focus({ monitor = "eDP-1" })' >/dev/null
+sleep 0.3
+toggle
+[[ "$(lj "d['screen']")" == eDP-1 && "$(layer_xywh rice-launcher)" == "eDP-1 1920 0 1920 1080" ]] \
+    && pass "with eDP-1 focused it opens on eDP-1" || fail "focused screen: $(lj "d['screen']"), layer '$(layer_xywh rice-launcher)'"
+"$R/qs-run.sh" shot eDP-1 "$SHOTS/qs-launcher-eDP-1.png" >/dev/null
+K -k Escape
+[[ -z "$(warns_since "$n0")" ]] && pass "qs log: no ERROR/WARN in section 8" || { fail "qs log section 8"; warns_since "$n0"; }
+kill -TERM "$kitty_pid" 2>/dev/null || true
+wait "$kitty_pid" 2>/dev/null || true
+kitty_pid=""
+kill -TERM "$holder_pid" 2>/dev/null || true
+wait "$holder_pid" 2>/dev/null || true
+holder_pid=""
+"$R/qs-run.sh" stop >/dev/null
 
 "$R/nested-hypr.sh" stop >/dev/null
 trap - EXIT

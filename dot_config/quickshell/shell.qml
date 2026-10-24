@@ -13,6 +13,7 @@
 import QtQuick
 import Quickshell
 import qs.bar
+import qs.launcher
 import qs.notifications
 import qs.rail
 import qs.services
@@ -57,4 +58,7 @@ ShellRoot {
 
     // The notification server (replaces mako) and its toasts on the main screen.
     Toasts {}
+
+    // The application launcher overlay (qs ipc call launcher toggle).
+    Launcher {}
 }
