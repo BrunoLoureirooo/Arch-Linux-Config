@@ -1,12 +1,15 @@
 pragma Singleton
 // System stats for the bar and rail (spec 5.3). One shared 2 s timer re-reads
-// /proc/stat, /proc/meminfo, /proc/net/route and the AMD GPU's gpu_busy_percent
-// through FileViews; no process is ever spawned. The AMD card is found once at start
-// by probing /sys/class/drm/card<N>/device/vendor for 0x1002; nothing else of any
-// other card is read, so the NVIDIA chip (0x10de) is never woken and nvidia-smi never
-// runs. netConn is the interface of the default route (the render shows `wlan0`):
+// /proc/stat, /proc/meminfo, /proc/net/route, /proc/net/dev and the AMD GPU's
+// gpu_busy_percent through FileViews; no process is ever spawned. The AMD card is
+// found once at start by probing /sys/class/drm/card<N>/device/vendor for 0x1002;
+// nothing else of any other card is read, so the NVIDIA chip (0x10de) is never woken
+// and nvidia-smi never runs. netConn is the interface of the default route (the render shows `wlan0`):
 // this machine runs iwd + systemd-networkd, not NetworkManager. A file that fails keeps
 // the last good value (gpu: -1) and logs one warning, not one per tick.
+// Throughput (rail sparkline): bytes/s summed over every interface but `lo`, from the
+// /proc/net/dev counter deltas between two ticks; netHistory keeps the last
+// historyLength (up + down) samples, oldest first.
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -19,14 +22,20 @@ Singleton {
     property real memPct: 0    // 0-100
     property real gpu: -1      // 0-100, -1 when there is no readable AMD sysfs file
     property string netConn: "" // default-route interface, "" when there is none
+    property real netUp: 0     // bytes/s sent, all non-loopback interfaces
+    property real netDown: 0   // bytes/s received
+    property list<real> netHistory: []  // up + down bytes/s, oldest first
+    readonly property int historyLength: 24
 
     // Sources. Plain properties so a test config can point them elsewhere.
     property string statPath: "/proc/stat"
     property string memPath: "/proc/meminfo"
     property string routePath: "/proc/net/route"
+    property string netDevPath: "/proc/net/dev"
     property string gpuPath: ""  // set by the vendor probe below
 
     property var lastCpu: null   // {total, idle} of the previous sample
+    property var lastNet: null   // {rx, tx, t} of the previous sample (t in ms)
     property var warned: ({})    // one warning per source
 
     function warnOnce(key, msg) {
@@ -98,6 +107,55 @@ Singleton {
         return best ? best.iface : "";
     }
 
+    // /proc/net/dev -> {rx, tx} byte counters summed over every interface except lo,
+    // or null when no interface line parses.
+    function parseNetDev(text) {
+        let rx = 0, tx = 0, n = 0;
+        for (const line of String(text).split("\n")) {
+            const colon = line.indexOf(":");
+            if (colon < 0)
+                continue;
+            const name = line.slice(0, colon).trim();
+            const f = line.slice(colon + 1).trim().split(/\s+/).map(Number);
+            if (name === "" || name.includes("|") || f.length < 16 || isNaN(f[0]) || isNaN(f[8]))
+                continue;
+            n++;
+            if (name === "lo")
+                continue;
+            rx += f[0];
+            tx += f[8];
+        }
+        return n > 0 ? { rx: rx, tx: tx } : null;
+    }
+
+    // Two parseNetDev samples {rx, tx, t(ms)} -> {up, down} bytes/s, or null when there
+    // is no usable delta (first sample, no time passed, or a counter went backwards
+    // because an interface vanished or was reset).
+    function netRates(prev, cur) {
+        if (!prev || !cur)
+            return null;
+        const dt = (cur.t - prev.t) / 1000;
+        const drx = cur.rx - prev.rx, dtx = cur.tx - prev.tx;
+        if (!(dt > 0) || drx < 0 || dtx < 0)
+            return null;
+        return { up: dtx / dt, down: drx / dt };
+    }
+
+    // bytes/s -> compact "512B" / "8.4K" / "120K" / "1.2M" / "3.0G" (1024 steps).
+    function compactRate(v) {
+        if (!(v >= 0))
+            return "0B";
+        const units = ["B", "K", "M", "G"];
+        let i = 0;
+        while (v >= 1024 && i < units.length - 1) {
+            v /= 1024;
+            i++;
+        }
+        if (i === 0)
+            return Math.round(v) + "B";
+        return (v < 10 ? v.toFixed(1) : Math.round(v)) + units[i];
+    }
+
     Timer {
         // No triggeredOnStart: each FileView's preload takes the first sample, and a
         // reload() while that load is in flight would drop it.
@@ -108,6 +166,7 @@ Singleton {
             statFile.reload();
             memFile.reload();
             routeFile.reload();
+            netDevFile.reload();
             if (root.gpuPath !== "")
                 gpuFile.reload();
         }
@@ -153,6 +212,30 @@ Singleton {
         printErrors: false
         onLoaded: root.netConn = root.parseRoute(text())
         onLoadFailed: error => root.warnOnce("route", "cannot read " + path + " (" + FileViewError.toString(error) + ")")
+    }
+
+    FileView {
+        id: netDevFile
+        path: root.netDevPath
+        printErrors: false
+        onLoaded: {
+            const c = root.parseNetDev(text());
+            if (!c) {
+                root.warnOnce("netdev", "cannot parse " + path);
+                return;
+            }
+            const cur = { rx: c.rx, tx: c.tx, t: Date.now() };
+            const r = root.netRates(root.lastNet, cur);
+            root.lastNet = cur;
+            if (r === null)
+                return;
+            root.netUp = r.up;
+            root.netDown = r.down;
+            const h = root.netHistory.slice(-(root.historyLength - 1));
+            h.push(r.up + r.down);
+            root.netHistory = h;
+        }
+        onLoadFailed: error => root.warnOnce("netdev", "cannot read " + path + " (" + FileViewError.toString(error) + ")")
     }
 
     FileView {

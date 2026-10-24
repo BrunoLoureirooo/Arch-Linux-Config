@@ -13,6 +13,8 @@
 import QtQuick
 import Quickshell
 import qs.bar
+import qs.rail
+import qs.services
 import qs.wallpaper
 
 ShellRoot {
@@ -33,6 +35,22 @@ ShellRoot {
         Bar {
             required property var modelData
             screen: modelData
+        }
+    }
+
+    // The rail exists only on the main screen: one LazyLoader per screen, active
+    // only for Screens.isMain, so no rail window or widget exists anywhere else.
+    Variants {
+        model: Quickshell.screens
+
+        LazyLoader {
+            id: railLoader
+            required property var modelData
+            active: Screens.isMain(modelData)
+
+            Rail {
+                screen: railLoader.modelData
+            }
         }
     }
 }
