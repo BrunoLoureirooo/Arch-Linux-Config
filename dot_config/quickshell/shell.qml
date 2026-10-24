@@ -61,4 +61,7 @@ ShellRoot {
 
     // The application launcher overlay (qs ipc call launcher toggle).
     Launcher {}
+
+    // The wallpaper carousel overlay (qs ipc call carousel toggle).
+    Carousel {}
 }
