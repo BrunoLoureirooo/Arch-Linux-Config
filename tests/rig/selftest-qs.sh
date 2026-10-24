@@ -767,6 +767,23 @@ d = ast.literal_eval(sys.stdin.read())
 sys.exit(0 if len(d) == 2 and all(w == 384 and 40 <= h <= 70 for w, h, _ in d) and d[0][2] else 1)" \
     && pass "empty summary + long body, long summary + long app name: 384 px (32em) wide, bounded height $dims" \
     || fail "long/empty texts: $dims"
+
+# f. Markup in the body (bold, an entity, a link) is shown as the literal string: plain
+#    text, on one line exactly as wide as the raw string measured as plain text (this
+#    also caught the toast width being rounded down, which wrapped the last word).
+"$R/qs-run.sh" ipc call toasts dismissAll
+sleep 0.3
+markup='<b>bold</b> &amp; <a href="x">link</a>'
+notify markup "markup" "$markup" 1 30000
+sleep 0.6
+mbody=$(tj "d['shown'][0]['body']")
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-toast-markup-DP-1.png" >/dev/null
+echo "$mbody" | python3 -I -c "
+import ast, sys
+b = ast.literal_eval(sys.stdin.read())
+sys.exit(0 if b and b['text'] == sys.argv[1] and b['plain'] and b['lines'] == 1 and abs(b['width'] - b['literalWidth']) <= 1 else 1)" "$markup" \
+    && pass "markup in the body is drawn literally (plain text, $(echo "$mbody" | python3 -I -c "import ast, sys; print(ast.literal_eval(sys.stdin.read())['width'])") px = the raw string's width)" \
+    || fail "markup body: $mbody"
 "$R/qs-run.sh" ipc call toasts dismissAll
 sleep 0.3
 [[ "$(tj "d['window'] is None")" == True && -z "$(layer_xywh rice-toasts)" ]] \
@@ -812,11 +829,18 @@ got=$("$R/qs-run.sh" ipc call launcherprobe parse)
     || { fail "launcher fixtures"; echo "  got  $got"; echo "  want $want"; }
 
 # A real kitty on the focused DP-1 holds the keyboard focus before the launcher opens.
+# It runs `cat` into a file, so every line typed into it can be checked: a layer surface
+# with exclusive keyboard focus does not change Hyprland's active window, so only keys
+# that arrive prove where the keyboard focus is.
+typed8="$tmp/kitty8-typed"
+: >"$typed8"
 H dispatch 'hl.dsp.focus({ monitor = "DP-1" })' >/dev/null
 "$R/run.sh" env HOME="$staged" XDG_CONFIG_HOME="$staged/.config" XDG_CACHE_HOME="$staged/.cache" \
     XDG_STATE_HOME="$staged/.local/state" XDG_DATA_HOME="$staged/.local/share" \
-    DBUS_SESSION_BUS_ADDRESS="$lbus" kitty --config=NONE --title rig-kitty >"$tmp/kitty8.out" 2>&1 </dev/null &
+    DBUS_SESSION_BUS_ADDRESS="$lbus" kitty --config=NONE --title rig-kitty sh -c "cat >>'$typed8'" \
+    >"$tmp/kitty8.out" 2>&1 </dev/null &
 kitty_pid=$!
+typed() { tr '\n' ' ' <"$typed8"; }
 for _ in $(seq 30); do sleep 0.3; [[ "$(H activewindow -j | spy "d.get('title')")" == rig-kitty ]] && break; done
 aw0=$(aw)
 
@@ -832,6 +856,9 @@ fakes="['Firefox Fake', 'Rig Many 01', 'Rig Many 02', 'Rig Many 03', 'Rig Many 0
     && pass "toggle opens on DP-1 (full-screen overlay); only the 13 fake entries, 8 rows shown, query focused" \
     || fail "launcher open: $(lj d) layer '$(layer_xywh rice-launcher)'"
 "$R/qs-run.sh" shot DP-1 "$SHOTS/qs-launcher-DP-1.png" >/dev/null
+[[ "$(lj "d['windowActive']")" == True && "$(aw)" == "$aw0" ]] \
+    && pass "while open the launcher window has the keyboard (Window.active); Hyprland's active window is still the kitty" \
+    || fail "open: windowActive $(lj "d['windowActive']"), active window $(aw) (kitty $aw0)"
 
 # b. Filtering: by name, by keyword.
 K fir
@@ -860,20 +887,24 @@ s_end=$(lj "d['selected']")
 
 # d. Escape closes and gives the keyboard back to the kitty; reopening starts clean.
 K -k Escape
-[[ "$(lj "d['open'] or d['window']")" == False && -z "$(layer_xywh rice-launcher)" && "$(aw)" == "$aw0" ]] \
-    && pass "Escape closes; the kitty ($aw0) is the active window again" || fail "Escape: $(lj d), active $(aw)"
+K aa -k Return
+[[ "$(lj "d['open'] or d['window']")" == False && -z "$(layer_xywh rice-launcher)" && "$(typed)" == "aa " ]] \
+    && pass "Escape closes; keys typed next reach the kitty ('$(typed)'), none typed while open did" \
+    || fail "Escape: $(lj d), kitty got '$(typed)'"
 toggle
 [[ "$(lj "(d['query'], d['selected'], d['count'])")" == "('', 0, 13)" ]] \
     && pass "reopening clears the query and the selection" || fail "reopen: $(lj d)"
 
 # e. Enter runs the selected entry (its Exec writes a marker) and closes.
 K fir
+w_active=$(lj "d['windowActive']")
 K -k Return
 sleep 0.7
-[[ "$(lj "d['open']")" == False && "$(markers_now)" == "firefox " && "$(cat "$markers/firefox")" == firefox \
-    && "$(aw)" == "$aw0" ]] \
-    && pass "Enter on Firefox Fake ran its Exec (marker 'firefox') and closed; focus back on the kitty" \
-    || fail "Enter: open $(lj "d['open']"), markers '$(markers_now)', active $(aw)"
+K bb -k Return
+[[ "$w_active" == True && "$(lj "d['open']")" == False && "$(markers_now)" == "firefox " \
+    && "$(cat "$markers/firefox")" == firefox && "$(typed)" == "aa bb " ]] \
+    && pass "Enter on Firefox Fake ran its Exec (marker 'firefox') and closed; the next keys reach the kitty" \
+    || fail "Enter: active $w_active, open $(lj "d['open']"), markers '$(markers_now)', kitty got '$(typed)'"
 
 # f. Zero matches: empty list; Enter does nothing.
 toggle
@@ -890,8 +921,10 @@ sleep 0.4
 in_open=$(lj "d['open']")
 "$R/run.sh" python3 -I "$R/vpointer.py" 300 800 >/dev/null
 sleep 0.4
-[[ "$in_open" == True && "$(lj "d['open']")" == False && "$(aw)" == "$aw0" ]] \
-    && pass "click inside the card keeps it open; click outside closes it" || fail "clicks: inside $in_open, after outside $(lj "d['open']")"
+K cc -k Return
+[[ "$in_open" == True && "$(lj "d['open']")" == False && "$(typed)" == "aa bb cc " ]] \
+    && pass "click inside the card keeps it open; click outside closes it and the kitty gets the keys again" \
+    || fail "clicks: inside $in_open, after outside $(lj "d['open']"), kitty got '$(typed)'"
 
 # h. Three toggles at once end open, with exactly one window.
 "$R/qs-run.sh" ipc call launcher toggle &

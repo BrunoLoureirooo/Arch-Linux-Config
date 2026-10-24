@@ -87,12 +87,13 @@ Scope {
             WlrLayershell.namespace: "rice-toasts"
 
             // All toasts share one width: the widest natural content, 19em to 32em.
+            // Rounded up: text needing 273.125 px wraps its last word in a 273 px box.
             readonly property real toastWidth: {
                 let w = 0;
                 for (const c of column.children)
                     if (c.naturalWidth !== undefined)
                         w = Math.max(w, c.naturalWidth);
-                return Math.round(Math.min(Math.max(w, root.px * 19), root.px * 32));
+                return Math.ceil(Math.min(Math.max(w, root.px * 19), root.px * 32));
             }
             implicitWidth: toastWidth
             implicitHeight: Math.max(1, column.implicitHeight)

@@ -25,6 +25,24 @@ ShellRoot {
         return out;
     }
 
+    // The body Text of a toast as drawn: its text, whether it is plain text, its laid-out
+    // width, and the advance width of the same string measured as plain text. Styled or
+    // rich rendering of markup makes the two widths differ.
+    TextMetrics {
+        id: metrics
+    }
+
+    function bodyOf(t) {
+        const body = findAll(t, i => i.textFormat !== undefined && i.text !== "" && i.text === t.n.body, [])[0];
+        if (!body)
+            return null;
+        metrics.font = body.font;
+        metrics.text = body.text;
+        return { text: body.text, plain: body.textFormat === Text.PlainText,
+                 width: Math.round(body.contentWidth), literalWidth: Math.round(metrics.advanceWidth),
+                 lines: body.lineCount, implicit: body.implicitWidth, box: body.width };
+    }
+
     IpcHandler {
         target: "toasts"
 
@@ -40,7 +58,8 @@ ShellRoot {
                     timeout: t.timeout, remaining: Math.round(t.remaining * 100) / 100,
                     x: Math.round(t.mapToItem(win.contentItem, 0, 0).x),
                     y: Math.round(t.mapToItem(win.contentItem, 0, 0).y),
-                    w: Math.round(t.width), h: Math.round(t.height)
+                    w: Math.round(t.width), h: Math.round(t.height),
+                    body: bodyOf(t)
                 }))
             });
         }

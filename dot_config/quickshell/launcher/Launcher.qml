@@ -261,6 +261,7 @@ Scope {
                                     color: row.sel ? Theme.bg : Theme.a1
                                     font.family: Theme.font
                                     font.pixelSize: root.px
+                                    textFormat: Text.PlainText
                                 }
                                 Text {
                                     Layout.maximumWidth: Math.round(root.px * 18)
