@@ -10,7 +10,11 @@
 #   5. bar and Stats (through tests/rig/stats.qml): parsers and Workspaces.layout on
 #      fixtures, live values against /proc and free -m, the default-route NET source,
 #      main screen, per-screen slots and their independence, the click dispatch,
-#      unreadable GPU/route files, no nvidia-smi or nmcli.
+#      unreadable GPU/route files, no nvidia-smi or nmcli;
+#   6. wallpaper and rail (through tests/rig/rail.qml, on a private session bus): state
+#      file fallbacks, image errors with exactly one warning, a huge image decoded at
+#      screen size, the rail on the main screen only, its exclusive zone against a real
+#      kitty, media hidden/shown with a fake MPRIS player, net sampling and failures.
 # Needs no running rig (starts and stops its own). Screenshots land in
 # ~/.cache/rice-testbin/shots/qs-*.png. Exit 0 = all checks passed.
 set -euo pipefail
@@ -23,10 +27,16 @@ pass() { echo "PASS $*"; }
 fail() { echo "FAIL $*"; fails=$((fails + 1)); }
 
 sup_pid=""
+kitty_pid=""
+fake_pid=""
+bus_pid=""
 cleanup() {
     [[ -z "$sup_pid" ]] || kill -TERM "$sup_pid" 2>/dev/null || true
+    [[ -z "$kitty_pid" ]] || kill -TERM "$kitty_pid" 2>/dev/null || true
+    [[ -z "$fake_pid" ]] || kill -TERM "$fake_pid" 2>/dev/null || true
     "$R/qs-run.sh" stop >/dev/null 2>&1 || true
     "$R/nested-hypr.sh" stop >/dev/null 2>&1 || true
+    [[ -z "$bus_pid" ]] || kill -TERM "$bus_pid" 2>/dev/null || true
     [[ -z "${tmp:-}" ]] || rm -rf -- "$tmp"
 }
 trap cleanup EXIT
@@ -45,7 +55,11 @@ for f in .config/quickshell/shell.qml .config/quickshell/Theme.qml .config/quick
     .config/quickshell/components/Meter.qml .config/quickshell/components/Chip.qml \
     .config/quickshell/services/Stats.qml .config/quickshell/services/Screens.qml \
     .config/quickshell/services/qmldir .config/quickshell/bar/Bar.qml \
-    .config/quickshell/bar/Workspaces.qml \
+    .config/quickshell/bar/Workspaces.qml .config/quickshell/wallpaper/Wallpaper.qml \
+    .config/quickshell/wallpaper/WallpaperState.qml .config/quickshell/wallpaper/qmldir \
+    .config/quickshell/rail/Rail.qml .config/quickshell/rail/ClockWidget.qml \
+    .config/quickshell/rail/SysWidget.qml .config/quickshell/rail/MediaWidget.qml \
+    .config/quickshell/rail/SectionLabel.qml \
     .local/share/rice/palette.py; do
     [[ -s "$st/$f" ]] || { ok=0; echo "  missing $f"; }
 done
@@ -77,14 +91,23 @@ mkdir -p "$tmp/foreign" && touch "$tmp/foreign/x"
 "$R/nested-hypr.sh" start "$R/full.lua" >/dev/null
 staged=$("$R/qs-run.sh" start --restage) && pass "qs-run.sh start (staged HOME $staged)" || fail "qs-run.sh start"
 sleep 1
-bad=$("$R/qs-run.sh" log | grep -E 'ERROR|WARN' | grep -v 'Failed to register with host portal' || true)
-[[ -z "$bad" ]] && pass "qs log: no ERROR/WARN besides the portal warning" || { fail "qs log has errors"; echo "$bad"; }
+# The fresh staged HOME has no wallpaper yet: exactly one warning for the missing
+# default image is expected (section 6 covers the wallpaper in detail).
+bad=$("$R/qs-run.sh" log | grep -E 'ERROR|WARN' | grep -v -e 'Failed to register with host portal' \
+    -e 'QML Image at @wallpaper/Wallpaper.qml.*Cannot open: .*/Pictures/berserk-wallpaper.jpg$' || true)
+nimg=$("$R/qs-run.sh" log | grep -c 'QML Image' || true)
+[[ -z "$bad" && "$nimg" == 1 ]] && pass "qs log: no ERROR/WARN besides the portal warning and one for the missing default wallpaper" \
+    || { fail "qs log has errors ($nimg image warnings)"; echo "$bad"; }
 qs_pid=$("$R/qs-run.sh" status | sed -n 's/^running: pid=\([0-9]*\) .*/\1/p')
 [[ "$(tr '\0' '\n' <"/proc/$qs_pid/environ" | grep -E '^(HOME|RICE_NO_RELOAD)=' | sort | tr '\n' ' ')" \
     == "HOME=$staged RICE_NO_RELOAD=1 " ]] && pass "qs runs with HOME=staged and RICE_NO_RELOAD=1" \
     || fail "qs environment"
 layers=$("$R/run.sh" hyprctl layers | grep -c 'namespace: rice-bar' || true)
 [[ "$layers" -eq 2 ]] && pass "bar on both outputs (2 rice-bar layers)" || fail "rice-bar layers: $layers"
+walls=$("$R/run.sh" hyprctl layers | grep -c 'namespace: rice-wallpaper' || true)
+railn=$("$R/run.sh" hyprctl layers | grep -c 'namespace: rice-rail,' || true)
+[[ "$walls" -eq 2 && "$railn" -eq 1 ]] && pass "shell.qml: wallpaper on both outputs, one rail" \
+    || fail "rice-wallpaper layers: $walls, rice-rail layers: $railn"
 "$R/qs-run.sh" shot DP-1 "$SHOTS/qs-skeleton-DP-1.png" >/dev/null && pass "qs-run.sh shot" || fail "qs-run.sh shot"
 "$R/qs-run.sh" stop >/dev/null
 ! kill -0 "$qs_pid" 2>/dev/null && ! "$R/qs-run.sh" status >/dev/null && pass "qs-run.sh stop" || fail "qs-run.sh stop"
@@ -298,6 +321,213 @@ after=$(sget)
 bad=$("$R/qs-run.sh" log | grep -E 'ERROR|WARN' | grep -v -e 'Failed to register with host portal' -e 'Stats: cannot read' || true)
 [[ -z "$bad" ]] && pass "qs log: no other ERROR/WARN" || { fail "qs log"; echo "$bad"; }
 "$R/qs-run.sh" stop >/dev/null
+
+# --- 6. wallpaper and rail --------------------------------------------------------------
+# A fresh rig and a private session bus: no live MPRIS player can leak in, and the fake
+# player below never touches the real bus. The staged HOME is re-created, so there is no
+# state file and no default image at the start.
+"$R/nested-hypr.sh" stop >/dev/null
+"$R/nested-hypr.sh" start "$R/full.lua" >/dev/null
+{ read -r bus_addr; read -r bus_pid; } < <(dbus-daemon --session --fork --nopidfile --print-address=1 --print-pid=1)
+[[ -n "$bus_addr" && "$bus_pid" =~ ^[0-9]+$ ]] || fail "private dbus-daemon"
+staged=$(DBUS_SESSION_BUS_ADDRESS="$bus_addr" "$R/qs-run.sh" start --restage --entry "$R/rail.qml")
+qs_pid=$("$R/qs-run.sh" status | sed -n 's/^running: pid=\([0-9]*\) .*/\1/p')
+sleep 3
+rget() { "$R/qs-run.sh" ipc call rail get; }
+rj() { rget | spy "$1"; }
+logn() { "$R/qs-run.sh" log | wc -l; }
+# Log lines after line $1 that are WARN or ERROR (the portal warning excluded).
+warns_since() { "$R/qs-run.sh" log | tail -n +"$(($1 + 1))" | grep -E 'WARN|ERROR' | grep -v 'host portal' || true; }
+state="$staged/.local/state/quickshell/wallpaper.json"
+pics="$staged/Pictures"
+mkdir -p "$pics" "$(dirname "$state")"
+put_state() { printf '%s\n' "$1" >"$state.tmp" && mv -f "$state.tmp" "$state"; }
+
+want='{"netDev":{"rx":4000,"tx":1000},"netDevBad":null,"netDevLoOnly":{"rx":0,"tx":0},'
+want+='"rates":{"up":1024,"down":2048},"ratesFirst":null,"ratesBack":null,"ratesNoTime":null,'
+want+='"compact":["0B","512B","1023B","1.0K","8.4K","120K","1.2M","3.0G","0B"],'
+want+='"state":[["/a/b.png","neon",false],["","",true],["","",true],["","",true],["","x",true],["","",true],["","",true],["","",true]]}'
+got=$("$R/qs-run.sh" ipc call rail parse)
+[[ "$got" == "$want" ]] && pass "net/dev parser, rates, compact units and wallpaper.json parser on fixtures" \
+    || { fail "rail fixtures"; echo "  got  $got"; echo "  want $want"; }
+
+# a. No state file, no default image: Theme.bg, exactly one warning, and the second
+#    screen never even tries the path.
+w=$(rget)
+echo "$w" | spy "'ok' if d['wallpaper']['path'] == d['wallpaper']['defaultPath'] == '$pics/berserk-wallpaper.jpg' and d['wallpaper']['verdict'] == -1 and d['wallpaper']['verdictPath'] == d['wallpaper']['path'] and d['wallpaper']['images']['DP-1']['status'] == 3 and d['wallpaper']['images']['eDP-1']['source'] == '' else d" | grep -qx ok \
+    && [[ "$(warns_since 0 | grep -c .)" == 1 && "$(warns_since 0 | grep -c 'QML Image')" == 1 ]] \
+    && pass "no state file, default image missing: background colour, one warning, eDP-1 never loads it" \
+    || { fail "missing default"; echo "  $w"; warns_since 0; }
+
+# b. The state file appears (FileView cannot watch an absent file: the 10 s re-check
+#    must pick it up) and names a 7680x4320 PNG: both screens decode it at 1920x1080.
+cp /usr/share/hypr/wall0.png "$pics/wall0.png"
+n0=$(logn)
+put_state "{\"path\": \"$pics/wall0.png\", \"palette\": \"wall0\"}"
+ok=""
+for _ in $(seq 30); do
+    sleep 0.5
+    [[ "$(rj "d['wallpaper']['images']['eDP-1']['status']")" == 1 ]] && { ok=1; break; }
+done
+w=$(rget)
+[[ -n "$ok" ]] && echo "$w" | spy "'ok' if d['wallpaper']['filePath'] == '$pics/wall0.png' and all(i['status'] == 1 and i['decoded'] == [1920, 1080] for i in d['wallpaper']['images'].values()) else d" | grep -qx ok \
+    && [[ -z "$(warns_since "$n0")" ]] \
+    && pass "state file created later is picked up; both screens show the image decoded at 1920x1080" \
+    || { fail "state file pickup / decode"; echo "  $w"; warns_since "$n0"; }
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-rail-DP-1.png" >/dev/null
+"$R/qs-run.sh" shot eDP-1 "$SHOTS/qs-wall-eDP-1.png" >/dev/null
+
+# c. Corrupt state file -> the default path, one warning about the file.
+n0=$(logn)
+put_state '{ not json'
+sleep 2
+[[ "$(rj "d['wallpaper']['path'] == d['wallpaper']['defaultPath']")" == True ]] && kill -0 "$qs_pid" \
+    && [[ "$(warns_since "$n0" | grep -c 'Wallpaper:.*cannot parse')" == 1 ]] \
+    && pass "corrupt wallpaper.json: default path, one warning, shell up" || { fail "corrupt state"; warns_since "$n0"; }
+
+# d./e. A text file and a directory: background colour, exactly one warning each, and
+#       only the main screen tried it.
+echo "not an image" >"$pics/notes.txt"
+mkdir -p "$pics/adir"
+for target in "$pics/notes.txt" "$pics/adir"; do
+    n0=$(logn)
+    put_state "{\"path\": \"$target\"}"
+    sleep 2
+    w=$(rget)
+    echo "$w" | spy "'ok' if d['wallpaper']['verdictPath'] == '$target' and d['wallpaper']['verdict'] == -1 and d['wallpaper']['images']['DP-1']['status'] == 3 and d['wallpaper']['images']['eDP-1']['source'] == '' else d" | grep -qx ok \
+        && [[ "$(warns_since "$n0" | grep -c .)" == 1 ]] && kill -0 "$qs_pid" \
+        && pass "path is ${target##*/}: background colour, exactly one warning: $(warns_since "$n0" | sed 's/.*Wallpaper.qml\[[0-9:]*\]: //' | cut -c1-40)" \
+        || { fail "bad image ${target##*/}"; echo "  $w"; warns_since "$n0"; }
+done
+n1=$(logn)
+sleep 4
+[[ "$(logn)" == "$n1" ]] && pass "no retry loop: log stable after the failures" || fail "log grows after failures"
+
+# f. An 8000x8000 PNG: decoded at most at screen size (crop-fill 1920x1920), shell up.
+python3 -I - "$pics/huge.png" <<'PY'
+import struct, sys, zlib
+w = h = 8000
+c = zlib.compressobj(1)
+row = b"\x00" + (b"\x00\xf0\xff" * 40 + b"\x10\x10\x20" * 40) * (w // 80)
+data = b"".join(c.compress(row) for _ in range(h)) + c.flush()
+ck = lambda t, d: struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+open(sys.argv[1], "wb").write(b"\x89PNG\r\n\x1a\n" + ck(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+                              + ck(b"IDAT", data) + ck(b"IEND", b""))
+PY
+rss0=$(awk '/^VmRSS/{print $2}' "/proc/$qs_pid/status")
+put_state "{\"path\": \"$pics/huge.png\"}"
+ok=""
+for _ in $(seq 40); do
+    sleep 0.5
+    [[ "$(rj "d['wallpaper']['images']['eDP-1']['status']")" == 1 ]] && { ok=1; break; }
+done
+sleep 2
+rss1=$(awk '/^VmRSS/{print $2}' "/proc/$qs_pid/status")
+w=$(rget)
+echo "  RSS before ${rss0} kB, after the 8000x8000 image ${rss1} kB"
+[[ -n "$ok" ]] && kill -0 "$qs_pid" && echo "$w" | spy "'ok' if all(i['status'] == 1 and max(i['decoded']) <= 1920 and min(i['decoded']) >= 1080 for i in d['wallpaper']['images'].values()) else d" | grep -qx ok \
+    && pass "8000x8000 PNG shown, decoded at $(echo "$w" | spy "d['wallpaper']['images']['DP-1']['decoded']") (not 8000x8000)" \
+    || { fail "huge image"; echo "  $w"; }
+put_state "{\"path\": \"$pics/wall0.png\"}"
+
+# g. The rail: one instance, on the main screen, below the bar; its width reserved.
+[[ "$(rj "d['railScreens']")" == "['DP-1']" && "$(rj "d['main']")" == "['DP-1']" ]] \
+    && pass "rail instance only on the main screen (DP-1)" || fail "rail screens: $(rj "d['railScreens']")"
+layer_xywh() {
+    H layers -j | python3 -I -c '
+import json, sys
+for mon, v in json.load(sys.stdin).items():
+    for lvl in v["levels"].values():
+        for l in lvl:
+            if l["namespace"] == sys.argv[1]:
+                print(mon, l["x"], l["y"], l["w"], l["h"])' "$1"
+}
+rail_geo=$(layer_xywh rice-rail)
+zone_geo=$(layer_xywh rice-rail-zone)
+reserved=$(H monitors -j | python3 -I -c 'import json,sys; print(" ".join(m["name"] + str(m["reserved"]) for m in json.load(sys.stdin)))')
+[[ "$rail_geo" == "DP-1 1488 26 432 1054" && "$zone_geo" == "DP-1 1919 26 1 1054" \
+    && "$reserved" == "DP-1[0, 26, 432, 0] eDP-1[0, 26, 0, 0]" ]] \
+    && pass "rail at 1488,26 432x1054 below the bar; 432 px reserved on DP-1 only; no rail on eDP-1" \
+    || fail "rail geometry: rail '$rail_geo' zone '$zone_geo' reserved '$reserved'"
+
+# h. A real kitty on DP-1 tiles up to the rail and below the bar (HOME etc. staged, no
+#    user config, private bus).
+"$R/run.sh" env HOME="$staged" XDG_CONFIG_HOME="$staged/.config" XDG_CACHE_HOME="$staged/.cache" \
+    XDG_STATE_HOME="$staged/.local/state" XDG_DATA_HOME="$staged/.local/share" \
+    DBUS_SESSION_BUS_ADDRESS="$bus_addr" kitty --config=NONE --title rig-kitty >"$tmp/kitty.out" 2>&1 </dev/null &
+kitty_pid=$!
+geo=""
+for _ in $(seq 30); do
+    sleep 0.3
+    geo=$(H clients -j | python3 -I -c '
+import json, sys
+for c in json.load(sys.stdin):
+    if c["title"] == "rig-kitty":
+        print(c["monitor"], c["at"][0], c["at"][1], c["size"][0], c["size"][1])')
+    [[ -n "$geo" ]] && break
+done
+read -r kmon kx ky kw kh <<<"${geo:-x 0 0 0 0}"
+echo "  kitty: monitor $kmon at $kx,$ky size ${kw}x${kh} (right edge $((kx + kw)), rail starts at 1488)"
+[[ "$kmon" == 0 && $((kx + kw)) -le 1488 && $((kx + kw)) -ge 1460 && "$ky" -ge 26 ]] \
+    && pass "kitty on DP-1 stops at the rail's left edge ($((kx + kw)) <= 1488) and below the bar (y $ky)" \
+    || fail "kitty geometry: '$geo'"
+sleep 0.5
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-rail-kitty-DP-1.png" >/dev/null
+kill -TERM "$kitty_pid" 2>/dev/null || true
+wait "$kitty_pid" 2>/dev/null || true
+kitty_pid=""
+
+# i. Media: hidden without a player; a fake player shows title, artist, length and a
+#    position that advances; hidden again when it goes away.
+[[ "$(rj "d['media']['visible']")" == False ]] && pass "no MPRIS player: media section hidden" \
+    || fail "media without player: $(rj "d['media']")"
+DBUS_SESSION_BUS_ADDRESS="$bus_addr" python3 -I "$R/fake-mpris.py" "Rig Song" "Rig Artist" 252 >"$tmp/fake.out" 2>&1 &
+fake_pid=$!
+for _ in $(seq 20); do sleep 0.3; [[ "$(rj "d['media']['visible']")" == True ]] && break; done
+m1=$(rget)
+sleep 2.5
+m2=$(rget)
+python3 -I -c '
+import json, sys
+a, b = json.loads(sys.argv[1])["media"], json.loads(sys.argv[2])["media"]
+print("  media:", b["texts"], "position %.1f -> %.1f" % (a["position"], b["position"]))
+ok = b["visible"] and b["title"] == "Rig Song" and b["artist"] == "Rig Artist" and abs(b["length"] - 252) < 0.01
+ok = ok and "4:12" in b["texts"] and b["position"] - a["position"] >= 1.5
+sys.exit(0 if ok else 1)' "$m1" "$m2" && pass "fake player: media shows title, artist, 4:12, position advances" \
+    || fail "media with fake player"
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-rail-media-DP-1.png" >/dev/null
+kill -TERM "$fake_pid" 2>/dev/null || true
+wait "$fake_pid" 2>/dev/null || true
+fake_pid=""
+for _ in $(seq 20); do sleep 0.3; [[ "$(rj "d['media']['visible']")" == False ]] && break; done
+[[ "$(rj "d['media']['visible']")" == False ]] && pass "player gone: media section hidden again" || fail "media after player exit"
+
+# j. Net sampling: the history grows on the shared timer and the sparkline draws it; an
+#    unreadable /proc/net/dev freezes it with one warning and no QML error.
+n_a=$(rj "d['net']['n']")
+sleep 4.2
+n_b=$(rj "d['net']['n']")
+[[ "$n_b" -gt "$n_a" && "$n_b" -le 24 && "$(rj "d['spark']['n']")" == "$n_b" ]] \
+    && pass "netHistory grows ($n_a -> $n_b samples), the sparkline draws all of them" || fail "net history $n_a -> $n_b"
+gpu_vis=$(rj "d['gpuRow']")
+n0=$(logn)
+"$R/qs-run.sh" ipc call rail setNetDevPath "$unread"
+"$R/qs-run.sh" ipc call rail setGpuPath "$unread"
+sleep 3
+n_c=$(rj "d['net']['n']")
+sleep 4.2
+w=$(rget)
+[[ "$(echo "$w" | spy "d['net']['n']")" == "$n_c" && "$(warns_since "$n0" | grep -c 'Stats: cannot read')" == 2 \
+    && "$(warns_since "$n0" | grep -vc 'Stats: cannot read')" == 0 ]] && kill -0 "$qs_pid" \
+    && pass "unreadable /proc/net/dev: history frozen at $n_c, one warning, no QML error" || { fail "unreadable net/dev"; warns_since "$n0"; }
+[[ -z "$amd" || "$gpu_vis" == True ]] && [[ "$(echo "$w" | spy "d['gpuRow']")" == False ]] \
+    && pass "GPU row shown with a GPU ($gpu_vis), hidden when gpu is -1" || fail "GPU row: before $gpu_vis, after $(echo "$w" | spy "d['gpuRow']")"
+bad=$("$R/qs-run.sh" log | grep -E 'ERROR|WARN' | grep -v -e 'host portal' -e 'Stats: cannot read' -e 'QML Image' \
+    -e 'Wallpaper:.*cannot parse' || true)
+[[ -z "$bad" ]] && pass "qs log: no other ERROR/WARN in section 6" || { fail "qs log section 6"; echo "$bad"; }
+"$R/qs-run.sh" stop >/dev/null
+kill -TERM "$bus_pid" 2>/dev/null || true
+bus_pid=""
 
 "$R/nested-hypr.sh" stop >/dev/null
 trap - EXIT
