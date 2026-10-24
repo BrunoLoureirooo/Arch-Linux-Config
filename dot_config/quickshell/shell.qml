@@ -13,6 +13,7 @@
 import QtQuick
 import Quickshell
 import qs.bar
+import qs.notifications
 import qs.rail
 import qs.services
 import qs.wallpaper
@@ -53,4 +54,7 @@ ShellRoot {
             }
         }
     }
+
+    // The notification server (replaces mako) and its toasts on the main screen.
+    Toasts {}
 }

@@ -14,7 +14,13 @@
 #   6. wallpaper and rail (through tests/rig/rail.qml, on a private session bus): state
 #      file fallbacks, image errors with exactly one warning, a huge image decoded at
 #      screen size, the rail on the main screen only, its exclusive zone against a real
-#      kitty, media hidden/shown with a fake MPRIS player, net sampling and failures.
+#      kitty, media hidden/shown with a fake MPRIS player, net sampling and failures;
+#   7. toasts (through tests/rig/toasts.qml, on a private bus with no service
+#      activation): one toast and its 5 s expiry, three at once with the rest queued, the
+#      sender's own timeout, a critical toast that stays until a real pointer click,
+#      long and empty texts, nothing left at idle.
+# Every qs this script starts runs on a private session bus (qs-run.sh starts its own
+# when none is given), so the shell's NotificationServer never meets the live mako.
 # Needs no running rig (starts and stops its own). Screenshots land in
 # ~/.cache/rice-testbin/shots/qs-*.png. Exit 0 = all checks passed.
 set -euo pipefail
@@ -30,6 +36,7 @@ sup_pid=""
 kitty_pid=""
 fake_pid=""
 bus_pid=""
+sup_bus_pid=""
 cleanup() {
     [[ -z "$sup_pid" ]] || kill -TERM "$sup_pid" 2>/dev/null || true
     [[ -z "$kitty_pid" ]] || kill -TERM "$kitty_pid" 2>/dev/null || true
@@ -37,6 +44,7 @@ cleanup() {
     "$R/qs-run.sh" stop >/dev/null 2>&1 || true
     "$R/nested-hypr.sh" stop >/dev/null 2>&1 || true
     [[ -z "$bus_pid" ]] || kill -TERM "$bus_pid" 2>/dev/null || true
+    [[ -z "$sup_bus_pid" ]] || kill -TERM "$sup_bus_pid" 2>/dev/null || true
     [[ -z "${tmp:-}" ]] || rm -rf -- "$tmp"
 }
 trap cleanup EXIT
@@ -59,7 +67,7 @@ for f in .config/quickshell/shell.qml .config/quickshell/Theme.qml .config/quick
     .config/quickshell/wallpaper/WallpaperState.qml .config/quickshell/wallpaper/qmldir \
     .config/quickshell/rail/Rail.qml .config/quickshell/rail/ClockWidget.qml \
     .config/quickshell/rail/SysWidget.qml .config/quickshell/rail/MediaWidget.qml \
-    .config/quickshell/rail/SectionLabel.qml \
+    .config/quickshell/rail/SectionLabel.qml .config/quickshell/notifications/Toasts.qml \
     .local/share/rice/palette.py; do
     [[ -s "$st/$f" ]] || { ok=0; echo "  missing $f"; }
 done
@@ -102,6 +110,15 @@ qs_pid=$("$R/qs-run.sh" status | sed -n 's/^running: pid=\([0-9]*\) .*/\1/p')
 [[ "$(tr '\0' '\n' <"/proc/$qs_pid/environ" | grep -E '^(HOME|RICE_NO_RELOAD)=' | sort | tr '\n' ' ')" \
     == "HOME=$staged RICE_NO_RELOAD=1 " ]] && pass "qs runs with HOME=staged and RICE_NO_RELOAD=1" \
     || fail "qs environment"
+# The shell's NotificationServer: on qs-run.sh's own private bus, never the live one.
+qs_bus=$(tr '\0' '\n' <"/proc/$qs_pid/environ" | sed -n 's/^DBUS_SESSION_BUS_ADDRESS=//p')
+owner=$(DBUS_SESSION_BUS_ADDRESS="$qs_bus" busctl --user --no-pager --no-legend list --acquired 2>/dev/null \
+    | awk '$1 == "org.freedesktop.Notifications" {print $2}')
+[[ -n "$qs_bus" && "$qs_bus" != *"path=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/bus"* && "$owner" == "$qs_pid" ]] \
+    && pass "shell.qml owns org.freedesktop.Notifications on a private bus only ($qs_bus)" \
+    || fail "notification server bus: '$qs_bus', owner '$owner'"
+idle=$("$R/run.sh" hyprctl layers | grep -c -e 'namespace: rice-toasts' || true)
+[[ "$idle" == 0 ]] && pass "idle: no toast surface exists" || fail "idle surfaces: $idle"
 layers=$("$R/run.sh" hyprctl layers | grep -c 'namespace: rice-bar' || true)
 [[ "$layers" -eq 2 ]] && pass "bar on both outputs (2 rice-bar layers)" || fail "rice-bar layers: $layers"
 walls=$("$R/run.sh" hyprctl layers | grep -c 'namespace: rice-wallpaper' || true)
@@ -152,13 +169,15 @@ kill "$decoy" 2>/dev/null || true
 wait "$decoy" 2>/dev/null || true
 
 # --- 4. qs-supervise -----------------------------------------------------------------
-# Start the staged supervisor with the same environment qs-run.sh uses.
+# Start the staged supervisor with the same environment qs-run.sh uses, on a private
+# bus (the production shell runs a NotificationServer).
+{ read -r sup_bus; read -r sup_bus_pid; } < <(dbus-daemon --config-file="$R/private-bus.conf" --fork --nopidfile --print-address=1 --print-pid=1)
 (
     # shellcheck source=tests/rig/rig_env.sh
     source "$R/rig_env.sh"
     export RICE_NO_RELOAD=1 HOME="$staged" XDG_CONFIG_HOME="$staged/.config" \
         XDG_DATA_HOME="$staged/.local/share" XDG_STATE_HOME="$staged/.local/state" \
-        XDG_CACHE_HOME="$staged/.cache" PATH="$staged/.local/bin:$PATH"
+        XDG_CACHE_HOME="$staged/.cache" PATH="$staged/.local/bin:$PATH" DBUS_SESSION_BUS_ADDRESS="$sup_bus"
     exec qs-supervise -p "$staged/.config/quickshell" --no-color
 ) >"$TB/selftest-qs-supervise.out" 2>&1 </dev/null &
 sup_pid=$!
@@ -199,6 +218,8 @@ else
         && pass "SIGTERM: supervisor and its qs exited, nothing restarted" || fail "supervisor SIGTERM"
     sup_pid=""
 fi
+kill -TERM "$sup_bus_pid" 2>/dev/null || true
+sup_bus_pid=""
 
 # --- 5. bar and Stats ------------------------------------------------------------------
 # Fresh rig so the workspace state is known: DP-1 (focused, an extra pool, starts on the
@@ -328,7 +349,7 @@ bad=$("$R/qs-run.sh" log | grep -E 'ERROR|WARN' | grep -v -e 'Failed to register
 # state file and no default image at the start.
 "$R/nested-hypr.sh" stop >/dev/null
 "$R/nested-hypr.sh" start "$R/full.lua" >/dev/null
-{ read -r bus_addr; read -r bus_pid; } < <(dbus-daemon --session --fork --nopidfile --print-address=1 --print-pid=1)
+{ read -r bus_addr; read -r bus_pid; } < <(dbus-daemon --config-file="$R/private-bus.conf" --fork --nopidfile --print-address=1 --print-pid=1)
 [[ -n "$bus_addr" && "$bus_pid" =~ ^[0-9]+$ ]] || fail "private dbus-daemon"
 # rice.wallpaper info lines ("loading <url> on <screen>") are off in production; on
 # here so the checks can see which images were ever loaded.
@@ -629,6 +650,120 @@ both_show wall0.png && sleep 1 && [[ "$(loads berserk-wallpaper.jpg)" == 0 && "$
 "$R/qs-run.sh" stop >/dev/null
 kill -TERM "$bus_pid" 2>/dev/null || true
 bus_pid=""
+
+# --- 7. toasts --------------------------------------------------------------------------
+# A fresh rig; qs-run.sh starts qs on its own private bus (no service activation). The
+# notifications below go only to that bus; the live session bus is never addressed.
+"$R/nested-hypr.sh" stop >/dev/null
+"$R/nested-hypr.sh" start "$R/full.lua" >/dev/null
+"$R/qs-run.sh" start --entry "$R/toasts.qml" >/dev/null
+tbus=$("$R/qs-run.sh" status | sed -n 's/.* bus=\([^ ]*\).*/\1/p')
+case "$tbus" in
+    "" | *"path=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/bus"*) echo "REFUSING: toast tests need a private bus, got '$tbus'"; exit 1 ;;
+esac
+notify() { # app summary body urgency timeout-ms
+    DBUS_SESSION_BUS_ADDRESS="$tbus" busctl --user call org.freedesktop.Notifications /org/freedesktop/Notifications \
+        org.freedesktop.Notifications Notify -- 'susssasa{sv}i' "$1" 0 "" "$2" "$3" 0 1 urgency y "$4" "$5" >/dev/null
+}
+tj() { "$R/qs-run.sh" ipc call toasts get | spy "$1"; }
+now() { date +%s.%N; }
+# Seconds until the toast window is gone (polled every 0.1 s, up to $1 s), or "never".
+gone_after() {
+    local t0 _
+    t0=$(now)
+    for _ in $(seq "$(($1 * 10))"); do
+        [[ "$(tj "d['window'] is None")" == True ]] && { echo "$(now) - $t0" | bc; return 0; }
+        sleep 0.1
+    done
+    echo never
+}
+n0=$(logn)
+
+# a. One toast: bottom right of the tiling area on the main screen, left of the rail
+#    (right margin = rail 432 + 1.4em = 449, bottom 0.9em = 11), a countdown bar that
+#    moves, gone after the 5 s default.
+notify quickshell "shell reloaded in 0.4s" "" 1 -1
+t_sent=$(now)
+sleep 0.5
+geo=$(layer_xywh rice-toasts)
+read -r tmon tx ty tw th <<<"${geo:-x 0 0 0 0}"
+r1=$(tj "d['shown'][0]['remaining']")
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-toast-DP-1.png" >/dev/null
+sleep 1
+r2=$(tj "d['shown'][0]['remaining']")
+[[ "$(tj "[t['summary'] for t in d['shown']]")" == "['shell reloaded in 0.4s']" && "$(tj "d['shown'][0]['timeout']")" == 5000 \
+    && "$tmon" == DP-1 && $((tx + tw)) == 1471 && $((ty + th)) == 1069 && "$tw" == 228 ]] \
+    && python3 -I -c "import sys; a, b = float(sys.argv[1]), float(sys.argv[2]); sys.exit(0 if 1 > a > b > 0 else 1)" "$r1" "$r2" \
+    && pass "one toast on DP-1 at $tx,$ty ${tw}x$th (right edge 1471 = rail + 1.4em, bottom 1069), bar $r1 -> $r2" \
+    || fail "one toast: layer '$geo', remaining $r1 -> $r2, $(tj d)"
+dt=$(gone_after 8)
+total=$(echo "$(now) - $t_sent" | bc)
+[[ "$dt" != never ]] && python3 -I -c "import sys; sys.exit(0 if 4.5 <= float(sys.argv[1]) <= 6.5 else 1)" "$total" \
+    && [[ -z "$(layer_xywh rice-toasts)" ]] \
+    && pass "the toast expired $(printf '%.1f' "$total") s after it was sent (default 5 s); no toast surface left" \
+    || fail "toast expiry: gone after '$dt' (total $total s)"
+
+# b. Five at once: three shown, two queued; the queued ones appear as slots free.
+for i in 1 2 3 4 5; do notify "app$i" "n$i" "" 1 -1; done
+sleep 0.5
+s1=$(tj "[t['summary'] for t in d['shown']]")
+q1=$(tj "len(d['tracked'])")
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-toasts-three-DP-1.png" >/dev/null
+s2=""
+for _ in $(seq 70); do
+    sleep 0.1
+    s2=$(tj "[t['summary'] for t in d['shown']]")
+    [[ "$s2" == "['n4', 'n5']" ]] && break
+done
+[[ "$s1" == "['n1', 'n2', 'n3']" && "$q1" == 5 && "$s2" == "['n4', 'n5']" ]] \
+    && pass "five quick notifications: $s1 shown, $q1 tracked; then $s2 as slots free" \
+    || fail "queue: first $s1 ($q1 tracked), then $s2"
+[[ "$(gone_after 8)" != never ]] || fail "queued toasts never expired"
+
+# c. The sender's own timeout (expireTimeout, milliseconds) replaces the default.
+notify app "two seconds" "" 1 2000
+t_sent=$(now)
+sleep 0.3
+to=$(tj "d['shown'][0]['timeout']")
+gone_after 5 >/dev/null
+total=$(echo "$(now) - $t_sent" | bc)
+[[ "$to" == 2000 ]] && python3 -I -c "import sys; sys.exit(0 if 1.5 <= float(sys.argv[1]) <= 3.2 else 1)" "$total" \
+    && pass "expireTimeout 2000 ms: timeout $to, gone after $(printf '%.1f' "$total") s" || fail "own timeout: $to, $total s"
+
+# d. Critical: stays far past its own 1 s timeout; a real pointer click dismisses it.
+notify app "stays" "critical one" 2 1000
+sleep 6.5
+crit=$(tj "[(t['summary'], t['critical'], t['remaining']) for t in d['shown']]")
+geo=$(layer_xywh rice-toasts)
+read -r tmon tx ty tw th <<<"${geo:-x 0 0 0 0}"
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-toast-critical-DP-1.png" >/dev/null
+"$R/run.sh" python3 -I "$R/vpointer.py" $((tx + tw / 2)) $((ty + th / 2)) >/dev/null
+sleep 0.5
+[[ "$crit" == "[('stays', True, 1)]" && "$(tj "d['window'] is None and d['tracked'] == []")" == True ]] \
+    && pass "critical toast still shown 6.5 s after a 1 s timeout; a pointer click at $((tx + tw / 2)),$((ty + th / 2)) dismissed it" \
+    || fail "critical: $crit, after click $(tj d)"
+
+# e. Empty summary and app name, a very long body; a very long summary and app name:
+#    32em wide at most, one summary line, two body lines, elided.
+long=$(python3 -I -c "print(' '.join(['lorem ipsum dolor sit amet consectetur'] * 30))")
+notify "" "" "$long" 1 30000
+notify "a-very-long-application-name-that-goes-on-and-on" "$long" "short body" 1 30000
+sleep 0.6
+dims=$(tj "[(t['w'], t['h'], t['summary'] == '') for t in d['shown']]")
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-toast-long-DP-1.png" >/dev/null
+echo "$dims" | python3 -I -c "
+import ast, sys
+d = ast.literal_eval(sys.stdin.read())
+sys.exit(0 if len(d) == 2 and all(w == 384 and 40 <= h <= 70 for w, h, _ in d) and d[0][2] else 1)" \
+    && pass "empty summary + long body, long summary + long app name: 384 px (32em) wide, bounded height $dims" \
+    || fail "long/empty texts: $dims"
+"$R/qs-run.sh" ipc call toasts dismissAll
+sleep 0.3
+[[ "$(tj "d['window'] is None")" == True && -z "$(layer_xywh rice-toasts)" ]] \
+    && pass "after the last toast: no toast window or surface" || fail "toasts left: $(tj d)"
+[[ -z "$(warns_since "$n0")" ]] && pass "qs log: no ERROR/WARN in section 7" || { fail "qs log section 7"; warns_since "$n0"; }
+"$R/qs-run.sh" stop >/dev/null
+
 
 "$R/nested-hypr.sh" stop >/dev/null
 trap - EXIT

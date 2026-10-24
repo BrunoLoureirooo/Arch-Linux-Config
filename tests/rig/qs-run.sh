@@ -12,6 +12,12 @@
 #       staged config dir as rig-<name>.qml, so `import qs` / `import qs.components`
 #       resolve against the staged shell exactly as production files do.
 #       Any other environment (e.g. XDG_DATA_DIRS) is inherited from the caller.
+#       Session bus: qs never runs on the live session bus (the shell's
+#       NotificationServer would compete with the live mako for
+#       org.freedesktop.Notifications). If the caller passes a private
+#       DBUS_SESSION_BUS_ADDRESS, it is used; if the address is unset or the live one
+#       ($XDG_RUNTIME_DIR/bus), qs-run.sh starts its own dbus-daemon (private-bus.conf:
+#       no service activation), records its PID and stops it with qs.
 #   qs-run.sh stop                 stop only the recorded qs (checked by marker env)
 #   qs-run.sh status               running/not running, PID, staged HOME, entry
 #   qs-run.sh log [qs log args]    qs log for that exact instance (--pid)
@@ -42,6 +48,21 @@ read_state() {
     QS_RUN_ID=$(sed -n 's/^QS_RUN_ID=//p' "$STATE")
     QS_HOME=$(sed -n 's/^QS_HOME=//p' "$STATE")
     QS_ENTRY=$(sed -n 's/^QS_ENTRY=//p' "$STATE")
+    QS_BUS_PID=$(sed -n 's/^QS_BUS_PID=//p' "$STATE")
+    QS_BUS=$(sed -n 's/^QS_BUS=//p' "$STATE")
+}
+
+# The live session bus: unset, or the user bus socket under XDG_RUNTIME_DIR.
+is_live_bus() {
+    local a="$1" run="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    [[ -z "$a" || "$a" == *"path=$run/bus" || "$a" == *"path=$run/bus,"* ]]
+}
+
+# Stop the private dbus-daemon this script started (only a dbus-daemon we own).
+stop_bus() {
+    local pid="$1"
+    [[ "$pid" =~ ^[0-9]+$ && -O "/proc/$pid" && "$(cat "/proc/$pid/comm" 2>/dev/null)" == dbus-daemon ]] || return 0
+    kill -TERM "$pid" 2>/dev/null || true
 }
 
 is_running() { read_state && pid_is_ours "$QS_PID" "$QS_RUN_ID"; }
@@ -72,25 +93,31 @@ cmd_start() {
         cp -f -- "$entry" "$target"
     fi
 
-    local id
+    local id bus="${DBUS_SESSION_BUS_ADDRESS:-}" bus_pid=""
     id="qsrun-$$-$(date +%s%N)"
+    if is_live_bus "$bus"; then
+        { read -r bus; read -r bus_pid; } < <(dbus-daemon --config-file="$R/private-bus.conf" --fork --nopidfile --print-address=1 --print-pid=1)
+        [[ -n "$bus" && "$bus_pid" =~ ^[0-9]+$ ]] || die "could not start a private dbus-daemon"
+    fi
     (
         # shellcheck source=tests/rig/rig_env.sh
         source "$R/rig_env.sh"
         export RICE_QS_RUN_ID="$id" RICE_NO_RELOAD=1 HOME="$STAGED" \
             XDG_CONFIG_HOME="$STAGED/.config" XDG_DATA_HOME="$STAGED/.local/share" \
             XDG_STATE_HOME="$STAGED/.local/state" XDG_CACHE_HOME="$STAGED/.cache" \
-            PATH="$STAGED/.local/bin:$PATH"
+            PATH="$STAGED/.local/bin:$PATH" DBUS_SESSION_BUS_ADDRESS="$bus"
         cd "$STAGED"
         exec qs -p "$target" --no-color
     ) >"$OUT" 2>&1 </dev/null &
     local pid=$!
-    printf 'QS_PID=%s\nQS_RUN_ID=%s\nQS_HOME=%s\nQS_ENTRY=%s\n' "$pid" "$id" "$STAGED" "$target" >"$STATE"
+    printf 'QS_PID=%s\nQS_RUN_ID=%s\nQS_HOME=%s\nQS_ENTRY=%s\nQS_BUS_PID=%s\nQS_BUS=%s\n' \
+        "$pid" "$id" "$STAGED" "$target" "$bus_pid" "$bus" >"$STATE"
 
     local i
     for ((i = 0; i < 100; i++)); do
         if ! kill -0 "$pid" 2>/dev/null; then
             rm -f "$STATE"
+            stop_bus "$bus_pid"
             tail -n 30 "$OUT" >&2
             die "qs exited during startup (output: $OUT)"
         fi
@@ -107,6 +134,7 @@ cmd_start() {
 cmd_stop() {
     if ! read_state; then echo "qs-run: not running"; return 0; fi
     if ! pid_is_ours "$QS_PID" "$QS_RUN_ID"; then
+        stop_bus "$QS_BUS_PID"
         rm -f "$STATE"
         echo "qs-run: removed stale $STATE (pid $QS_PID not signalled)"
         return 0
@@ -123,13 +151,14 @@ cmd_stop() {
         kill -KILL "$QS_PID" 2>/dev/null || true
         for ((i = 0; i < 20; i++)); do [[ -e "/proc/$QS_PID" ]] || break; sleep 0.1; done
     fi
+    stop_bus "$QS_BUS_PID"
     rm -f "$STATE"
     echo "qs-run: stopped pid $QS_PID"
 }
 
 cmd_status() {
     if is_running; then
-        echo "running: pid=$QS_PID home=$QS_HOME entry=$QS_ENTRY"
+        echo "running: pid=$QS_PID home=$QS_HOME entry=$QS_ENTRY bus=$QS_BUS${QS_BUS_PID:+ (own dbus-daemon $QS_BUS_PID)}"
     else
         echo "not running"
         [[ ! -e "$STATE" ]] || echo "(stale $STATE present)"
