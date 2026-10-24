@@ -22,7 +22,10 @@
 #   8. launcher (through tests/rig/launcher.qml, XDG_DATA_DIRS with fake .desktop files
 #      only): open/close, filter, selection keys, Enter runs the entry (a marker file),
 #      Escape, clicks, zero matches, rapid toggles, focused screen, keyboard focus back
-#      to the previous window.
+#      to the previous window;
+#   9. wallpaper carousel (through tests/rig/carousel.qml): listing, live palette and
+#      wallpaper preview, Escape writes nothing, Enter applies and persists, rapid input
+#      keeps one derive running, empty/single/broken folders, keyboard focus.
 # Every qs this script starts runs on a private session bus (qs-run.sh starts its own
 # when none is given), so the shell's NotificationServer never meets the live mako.
 # Needs no running rig (starts and stops its own). Screenshots land in
@@ -913,6 +916,314 @@ toggle
 "$R/qs-run.sh" shot eDP-1 "$SHOTS/qs-launcher-eDP-1.png" >/dev/null
 K -k Escape
 [[ -z "$(warns_since "$n0")" ]] && pass "qs log: no ERROR/WARN in section 8" || { fail "qs log section 8"; warns_since "$n0"; }
+kill -TERM "$kitty_pid" 2>/dev/null || true
+wait "$kitty_pid" 2>/dev/null || true
+kitty_pid=""
+kill -TERM "$holder_pid" 2>/dev/null || true
+wait "$holder_pid" 2>/dev/null || true
+holder_pid=""
+"$R/qs-run.sh" stop >/dev/null
+
+# --- 9. wallpaper carousel (U11) -----------------------------------------------------------
+# Through tests/rig/carousel.qml (wallpaper, bars, rail and the production Carousel) on a
+# re-created staged HOME and qs-run.sh's own private bus. The folder holds three generated
+# gradients (one named Tide.PNG, so the filter and the name sort must ignore case), a copy
+# of wall0.png, a text file and a 0-byte broken.png; moss.png is applied
+# first, so it is the current wallpaper. The private matugen comes from the rig PATH
+# (rig_env.sh), RICE_NO_RELOAD=1 from qs-run.sh. Expected palettes are computed by running
+# `rice-palette derive` independently in the same staged environment.
+staged=$("$R/qs-run.sh" start --restage --entry "$R/carousel.qml")
+"$R/qs-run.sh" stop >/dev/null
+wp="$staged/Pictures/wallpapers"
+mkdir -p "$wp" "$tmp/c9"
+mkgrad() { # file w h r,g,b r,g,b : vertical gradient with a bright disc
+    python3 -I - "$@" <<'PY'
+import struct, sys, zlib
+f, w, h = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+a = [int(x) for x in sys.argv[4].split(",")]
+b = [int(x) for x in sys.argv[5].split(",")]
+cx, cy, rr = w * 0.62, h * 0.42, (h * 0.18) ** 2
+hi = bytes(min(255, b[i] + 120) for i in range(3))
+rows = []
+for y in range(h):
+    t = y / (h - 1)
+    row = bytearray(bytes(int(a[i] + (b[i] - a[i]) * t) for i in range(3)) * w)
+    dy = (y - cy) ** 2
+    if dy < rr:
+        half = int((rr - dy) ** 0.5)
+        x0, x1 = max(0, int(cx - half)), min(w, int(cx + half))
+        row[x0 * 3:x1 * 3] = hi * (x1 - x0)
+    rows.append(b"\x00" + bytes(row))
+ck = lambda t, d: struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+open(f, "wb").write(b"\x89PNG\r\n\x1a\n" + ck(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+                    + ck(b"IDAT", zlib.compress(b"".join(rows), 6)) + ck(b"IEND", b""))
+PY
+}
+mkgrad "$wp/ember.png" 640 360 20,2,4 200,40,30
+mkgrad "$wp/moss.png" 640 360 2,18,6 30,170,60
+mkgrad "$wp/Tide.PNG" 640 360 2,4,24 30,70,210
+cp /usr/share/hypr/wall0.png "$wp/"
+echo "not a wallpaper" >"$wp/notes.txt"
+: >"$wp/broken.png"
+senv() { "$R/run.sh" env HOME="$staged" XDG_CONFIG_HOME="$staged/.config" XDG_CACHE_HOME="$staged/.cache" \
+    XDG_STATE_HOME="$staged/.local/state" XDG_DATA_HOME="$staged/.local/share" RICE_NO_RELOAD=1 "$@"; }
+derive_a1() { senv "$staged/.local/bin/rice-palette" derive "$wp/$1" | spy "d['a1']"; }
+senv "$staged/.local/bin/rice-palette" apply "$wp/moss.png" || fail "seed apply moss.png"
+a1_moss=$(derive_a1 moss.png); a1_tide=$(derive_a1 Tide.PNG); a1_ember=$(derive_a1 ember.png)
+a1_wall0=$(derive_a1 wall0.png)
+[[ -n "$a1_moss" && "$a1_moss" != "$a1_tide" && "$a1_tide" != "$a1_ember" && "$a1_wall0" != "$a1_tide" ]] \
+    || fail "test images do not give distinct palettes: $a1_moss $a1_tide $a1_ember $a1_wall0"
+rm -f "$staged"/.cache/rice/*.json   # every derivation below starts cold
+outs=(.config/quickshell/colors.json .config/kitty/colors.conf .config/hypr/colors.lua
+      .config/btop/themes/rice.theme .local/state/quickshell/wallpaper.json)
+outsums() { (cd "$staged" && sha1sum "${outs[@]}"); }
+# Every file in the staged HOME except caches: rice-palette's own derive cache (.cache/rice)
+# and Python's bytecode cache (__pycache__, recompiled after re-staging touched the .py files).
+tree_sums() { (cd "$staged" && find . -path ./.cache -prune -o -path ./.chezmoi-cache -prune -o -name __pycache__ -prune \
+    -o -type f -print0 | sort -z | xargs -0 sha1sum); }
+
+"$R/run.sh" wtype -s 900000 >/dev/null 2>&1 &
+holder_pid=$!
+"$R/qs-run.sh" start --entry "$R/carousel.qml" >/dev/null
+sleep 1
+cbus=$("$R/qs-run.sh" status | sed -n 's/.* bus=\([^ ]*\).*/\1/p')
+cj() { "$R/qs-run.sh" ipc call carouselprobe get | spy "$1"; }
+K() { "$R/keys.sh" "$@"; sleep 0.3; }
+ctoggle() { "$R/qs-run.sh" ipc call carousel toggle; sleep 0.5; }
+# Wait (up to 30 s) until no derivation runs or is queued.
+settled() { local i; for ((i = 0; i < 150; i++)); do
+    [[ "$(cj "d['deriving'] or d['pending'] != '' or d['applying'] or d['settling'] or bool(d['open'] and d.get('files') and d.get('result') is None)")" == False ]] && return 0
+    sleep 0.2; done; return 1; }
+n0=$(logn)
+
+want='{"dims":["1920×1080","3840×2160","640×480",""],"oneLine":["not an image: /x/broken.png","","matugen failed: boom"],'
+want+='"ok":{"ok":true,"tokens":{"bg":"#07070d","panel":"#0c0d16","line":"#1b1d30","dim":"#6a7399","fg":"#d7e3f0","a1":"#00f0ff","a2":"#ff2e88","warn":"#ffd23f"},"dims":"8×4"},'
+want+='"fail":{"ok":false,"error":"not an image: /x/b.png"},"garbage":{"ok":false,"error":"unusable rice-palette output"},'
+want+='"partial":{"ok":false,"error":"rice-palette gave no panel,line,dim,fg,a1,a2,warn"}}'
+got=$("$R/qs-run.sh" ipc call carouselprobe parse)
+[[ "$got" == "$want" ]] && pass "carousel helpers (file size, error line, derive output parser) on fixtures" \
+    || { fail "carousel fixtures"; echo "  got  $got"; echo "  want $want"; }
+
+# A kitty on the focused DP-1 whose shell records what is typed into it: proof of where
+# the keyboard focus is.
+H dispatch 'hl.dsp.focus({ monitor = "DP-1" })' >/dev/null
+typed="$tmp/c9/typed"
+: >"$typed"
+"$R/run.sh" env HOME="$staged" XDG_CONFIG_HOME="$staged/.config" XDG_CACHE_HOME="$staged/.cache" \
+    XDG_STATE_HOME="$staged/.local/state" XDG_DATA_HOME="$staged/.local/share" \
+    DBUS_SESSION_BUS_ADDRESS="$cbus" kitty --config=NONE --title rig-kitty9 sh -c "cat >>'$typed'" \
+    >"$tmp/kitty9.out" 2>&1 </dev/null &
+kitty_pid=$!
+for _ in $(seq 30); do sleep 0.3; [[ "$(H activewindow -j | spy "d.get('title')")" == rig-kitty9 ]] && break; done
+aw0=$(aw)
+K a -k Return
+[[ "$(cat "$typed")" == a ]] && pass "kitty probe has the keyboard before the carousel opens" || fail "kitty probe: '$(cat "$typed")'"
+
+# a. Closed: nothing. Open: a bottom strip on DP-1, keyboard focus, the image files only
+#    (notes.txt not listed, broken.png listed), the current wallpaper (moss) selected.
+[[ "$(cj "d['open'] or d['window']")" == False && -z "$(layer_xywh rice-carousel)" ]] \
+    && pass "carousel closed: no window, no surface" || fail "carousel at start: $(cj d)"
+tree0=$(tree_sums)
+ctoggle
+settled || fail "open: derivation did not finish"
+[[ "$(cj "(d['files'], d['selName'], d['screen'], d['focus'])")" \
+    == "(['broken.png', 'ember.png', 'moss.png', 'Tide.PNG', 'wall0.png'], 'moss.png', 'DP-1', True)" ]] \
+    && pass "open on DP-1: 5 images (notes.txt not listed, broken.png listed), current moss.png selected, keyboard focus" \
+    || fail "open: $(cj "(d['files'], d['selName'], d['screen'], d['focus'])")"
+geo=$(layer_xywh rice-carousel)
+[[ "$geo" =~ ^DP-1\ 0\ ([0-9]+)\ 1920\ ([0-9]+)$ && $((BASH_REMATCH[1] + BASH_REMATCH[2])) == 1080 && ${BASH_REMATCH[2]} -gt 200 ]] \
+    && pass "one bottom-anchored full-width overlay surface ($geo)" || fail "carousel surface '$geo'"
+[[ "$(cj "d['texts'][:3]")" == "['WALLPAPER // ', 'moss.png', '640×360 · png · ←/→ select · ⏎ apply · esc cancel']" ]] \
+    && pass "header: WALLPAPER // moss.png, real size 640×360 and type" || fail "header: $(cj "d['texts']")"
+[[ "$(cj "[t['name'] for t in d['thumbs']]")" == "['broken.png', 'ember.png', 'moss.png', 'Tide.PNG', 'wall0.png']" \
+    && "$(cj "[t['on'] for t in d['thumbs']]")" == "[False, False, True, False, False]" \
+    && "$(cj "d['thumbs'][2]['w'] > 1.7 * d['thumbs'][0]['w'] and d['thumbs'][0]['opacity'] < 1 and d['thumbs'][2]['opacity'] == 1")" == True ]] \
+    && pass "five thumbnails, the selected one centred, larger and opaque, neighbours dimmed" || fail "thumbs: $(cj "d['thumbs']")"
+[[ "$(cj "(d['previewing'], d['theme']['a1'], 'PALETTE' in d['texts'], '03' in d['texts'])")" == "(True, '$a1_moss', True, True)" ]] \
+    && pass "moss palette previewed, swatches and index tag 03 shown" || fail "open palette: $(cj "(d['previewing'], d['theme'], d['texts'])")"
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-carousel-DP-1.png" >/dev/null
+
+# b. Right: the whole shell takes tide's palette and both screens show Tide.PNG.
+K -k Right
+settled || fail "Right: derivation did not finish"
+[[ "$(cj "(d['selName'], d['theme']['a1'], d['wallPreview'].endswith('/Tide.PNG'), [w['shown'].endswith('/Tide.PNG') and w['ready'] for w in d['walls']])")" \
+    == "('Tide.PNG', '$a1_tide', True, [True, True])" ]] \
+    && pass "Right: Tide.PNG previewed (Theme a1 $a1_moss -> $a1_tide), both screens show it" \
+    || fail "Right: $(cj "(d['selName'], d['theme']['a1'], d['wallPreview'], d['walls'])")"
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-carousel-tide-DP-1.png" >/dev/null
+"$R/qs-run.sh" shot eDP-1 "$SHOTS/qs-carousel-tide-eDP-1.png" >/dev/null   # the previewed wallpaper
+
+# c. Right twice (wrapping): broken.png fails; the previous preview (wall0) stays; Enter
+#    does nothing.
+K -k Right
+settled || fail "wall0: derivation did not finish"
+K -k Right
+settled || fail "broken: derivation did not finish"
+[[ "$(cj "(d['selName'], d['sel'], d['theme']['a1'], d['wallPreview'].endswith('/wall0.png'), d['texts'][-1])")" \
+    == "('broken.png', 0, '$a1_wall0', True, '✗ not an image: broken.png')" ]] \
+    && pass "wrap to broken.png: '✗ not an image: broken.png', wall0 preview kept" \
+    || fail "broken: $(cj "(d['selName'], d['sel'], d['theme']['a1'], d['wallPreview'], d['texts'])")"
+K -k Return
+sleep 0.5
+[[ "$(cj "(d['open'], d['applying'])")" == "(True, False)" ]] && pass "Enter on broken.png does nothing" \
+    || fail "Enter on broken: $(cj "(d['open'], d['applying'])")"
+
+# d. Escape: preview gone, original colours and wallpaper, nothing written, focus back.
+K -k Escape
+[[ "$(cj "(d['open'], d['previewing'], d['wallPreview'], d['theme']['a1'], [w['shown'].endswith('/moss.png') for w in d['walls']])")" \
+    == "(False, False, '', '$a1_moss', [True, True])" && -z "$(layer_xywh rice-carousel)" ]] \
+    && pass "Escape: closed, moss colours and wallpaper back" || fail "Escape: $(cj d)"
+[[ "$(tree_sums)" == "$tree0" ]] && pass "Escape wrote nothing (staged HOME identical outside .cache)" \
+    || { fail "Escape changed files"; diff <(echo "$tree0") <(tree_sums) || true; }
+K b -k Return
+[[ "$(H activewindow -j | spy "d.get('address')")" == "$aw0" && "$(tr '\n' ' ' <"$typed")" == "a b " ]] \
+    && pass "after Escape the kitty ($aw0) is active and gets the typed keys" || fail "focus after Escape: '$(cat "$typed")'"
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-carousel-escape-DP-1.png" >/dev/null
+
+# e. Enter applies (ember): the five files change in the staged HOME, the shell shows the
+#    new palette without a restart, the preview is dropped, focus returns. Left and Enter
+#    come in one wtype run, so Enter arrives while ember's palette is still being derived
+#    (not derived yet in this session): it must wait for the palette and then apply.
+sums0=$(outsums)
+ctoggle
+settled || fail "reopen: derivation did not finish"
+nq=$(logn)
+t_apply=$(date +%s%N)
+K -k Left -k Return
+settled || fail "apply did not settle"
+t_apply=$(( ($(date +%s%N) - t_apply) / 1000000 ))
+queued=$("$R/qs-run.sh" log | tail -n +"$((nq + 1))" | grep -c 'Carousel: Enter waits for the palette of .*/ember\.png$' || true)
+[[ "$queued" == 1 ]] && pass "Enter during ember's derivation was queued (one log line), not dropped" \
+    || fail "queued Enter: $queued log lines"
+# The preview ends when Theme and WallpaperState have re-read the files, not by the 3 s
+# fallback timer.
+[[ $t_apply -lt 2800 ]] && pass "Left + Enter to a settled shell in $t_apply ms (no 3 s fallback)" \
+    || fail "apply took $t_apply ms to settle"
+changed=$(diff <(echo "$sums0") <(outsums) | grep -c '^>' || true)
+[[ "$changed" == 5 && "$(spy "d['path']" <"$staged/.local/state/quickshell/wallpaper.json")" == "$wp/ember.png" \
+    && "$(spy "d['a1']" <"$staged/.config/quickshell/colors.json")" == "$a1_ember" ]] \
+    && pass "Enter: colors.json, kitty, hypr, btop and wallpaper.json all rewritten in the staged HOME (ember)" \
+    || fail "apply files: $changed changed; $(cat "$staged/.local/state/quickshell/wallpaper.json")"
+[[ "$(cj "(d['open'], d['previewing'], d['wallPreview'], d['theme']['a1'], d['wallFile'].endswith('/ember.png'))")" \
+    == "(False, False, '', '$a1_ember', True)" ]] \
+    && pass "after apply: closed, no preview left, Theme and WallpaperState read ember from the files" \
+    || fail "after apply: $(cj d)"
+K c -k Return
+[[ "$(H activewindow -j | spy "d.get('address')")" == "$aw0" && "$(tr '\n' ' ' <"$typed")" == "a b c " ]] \
+    && pass "after Enter the kitty is active again and gets the typed keys" || fail "focus after Enter: '$(cat "$typed")'"
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-carousel-applied-DP-1.png" >/dev/null
+
+bad=$(warns_since "$n0" | grep -v -E 'QML Image at @wallpaper/Carousel.qml.*Error decoding: .*/broken\.png: Unsupported image format$' || true)
+ndec=$(warns_since "$n0" | grep -c 'Carousel.qml.*Error decoding' || true)
+[[ -z "$bad" && "$ndec" == 2 ]] && pass "qs log: only the broken.png decode warning, once per open (2 opens)" \
+    || { fail "qs log section 9 before restart ($ndec decode warnings)"; echo "$bad"; }
+
+# f. Restart: the choice persists.
+"$R/qs-run.sh" stop >/dev/null
+"$R/qs-run.sh" start --entry "$R/carousel.qml" >/dev/null
+sleep 2
+n0=$(logn)
+[[ "$(cj "(d['theme']['a1'], d['wallFile'].endswith('/ember.png'), [w['shown'].endswith('/ember.png') and w['ready'] for w in d['walls']])")" \
+    == "('$a1_ember', True, [True, True])" ]] && pass "restart: ember palette and wallpaper persist" \
+    || fail "restart: $(cj d)"
+
+# g. Rapid input: 22 Right presses 40 ms apart with a cold derive cache. At most one
+#    rice-palette derive (and one matugen) at any sample; the final preview is the final
+#    selection (ember + 22 = tide on 5 images).
+rm -f "$staged"/.cache/rice/*.json
+ctoggle
+settled || fail "burst: initial derivation did not finish"
+samples="$tmp/c9/samples"
+( for _ in $(seq 400); do
+      echo "$(pgrep -fc "$staged/.local/bin/rice-palette derive" || true) $(pgrep -xc matugen || true)"
+      sleep 0.02
+  done ) >"$samples" &
+sampler=$!
+sleep 0.2
+burst=()
+for _ in $(seq 22); do burst+=(-k Right); done
+"$R/keys.sh" -d 40 "${burst[@]}"
+settled || fail "burst did not settle"
+kill "$sampler" 2>/dev/null || true
+wait "$sampler" 2>/dev/null || true
+maxd=$(cut -d' ' -f1 "$samples" | sort -n | tail -1)
+maxm=$(cut -d' ' -f2 "$samples" | sort -n | tail -1)
+busy=$(awk '$1 > 0' "$samples" | wc -l)
+[[ "$maxd" == 1 && "$maxm" -le 1 && "$busy" -gt 0 ]] \
+    && pass "22 quick Right presses: at most 1 derive / $maxm matugen running at any of $(wc -l <"$samples") samples ($busy busy)" \
+    || fail "burst processes: max derive $maxd, max matugen $maxm, busy samples $busy"
+[[ "$(cj "(d['selName'], d['theme']['a1'], d['result']['tokens']['a1'], d['wallPreview'].endswith('/Tide.PNG'), [w['shown'].endswith('/Tide.PNG') for w in d['walls']])")" \
+    == "('Tide.PNG', '$a1_tide', '$a1_tide', True, [True, True])" ]] \
+    && pass "after the burst: Tide.PNG selected and previewed (palette and wallpaper)" \
+    || fail "after burst: $(cj "(d['selName'], d['theme']['a1'], d['result'], d['wallPreview'])")"
+K -k Escape
+
+# g2. The focused screen decides where it opens.
+H dispatch 'hl.dsp.focus({ monitor = "eDP-1" })' >/dev/null
+sleep 0.3
+ctoggle
+settled || fail "eDP-1: derivation did not finish"
+geo=$(layer_xywh rice-carousel)
+[[ "$(cj "(d['open'], d['screen'], d['focus'])")" == "(True, 'eDP-1', True)" && "$geo" =~ ^eDP-1\ 1920\  ]] \
+    && pass "with eDP-1 focused it opens on eDP-1 ($geo)" || fail "focused screen: $(cj "d['screen']"), layer '$geo'"
+"$R/qs-run.sh" shot eDP-1 "$SHOTS/qs-carousel-eDP-1.png" >/dev/null
+K -k Escape
+[[ "$(cj "d['open']")" == False ]] || fail "eDP-1: Escape did not close"
+H dispatch 'hl.dsp.focus({ monitor = "DP-1" })' >/dev/null
+sleep 0.3
+
+# h. Empty folder, missing folder, one image, only broken files.
+mkdir -p "$staged/Pictures/aside"
+mv "$wp"/* "$staged/Pictures/aside/"
+ctoggle
+[[ "$(cj "(d['files'], d['texts'], d['thumbs'], d['previewing'])")" == "([], ['no wallpapers in ~/Pictures/wallpapers'], [], False)" ]] \
+    && pass "empty folder: the single line 'no wallpapers in ~/Pictures/wallpapers'" || fail "empty: $(cj d)"
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-carousel-empty-DP-1.png" >/dev/null
+sums0=$(outsums)
+K -k Right -k Return
+[[ "$(cj "d['open']")" == True && "$(outsums)" == "$sums0" ]] && pass "empty folder: Right/Enter do nothing" || fail "empty keys"
+K -k Escape
+rmdir "$wp"
+ctoggle
+[[ "$(cj "(d['files'], d['texts'])")" == "([], ['no wallpapers in ~/Pictures/wallpapers'])" ]] \
+    && pass "missing folder: the same empty state" || fail "missing folder: $(cj d)"
+K -k Escape
+mkdir -p "$wp"
+cp "$staged/Pictures/aside/moss.png" "$wp/"
+ctoggle
+settled || fail "single: derivation did not finish"
+K -k Right
+[[ "$(cj "(d['files'], d['sel'], len(d['thumbs']), d['theme']['a1'], '←/→ select' in d['texts'][2])")" \
+    == "(['moss.png'], 0, 1, '$a1_moss', False)" ]] \
+    && pass "one image: one thumbnail, no scrolling, its palette previewed" || fail "single: $(cj d)"
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-carousel-single-DP-1.png" >/dev/null
+K -k Return
+settled || fail "single apply did not settle"
+[[ "$(cj "d['open']")" == False && "$(spy "d['path']" <"$staged/.local/state/quickshell/wallpaper.json")" == "$wp/moss.png" ]] \
+    && pass "one image: Enter applies it" || fail "single apply: $(cat "$staged/.local/state/quickshell/wallpaper.json")"
+rm -f "$wp/moss.png"
+: >"$wp/broken.png"
+echo "not a picture" >"$wp/fake.jpg"
+sums0=$(outsums)
+ctoggle
+settled || fail "broken-only: derivation did not finish"
+K -k Right
+settled || true
+[[ "$(cj "(d['files'], d['selName'], d['previewing'], d['texts'][-1])")" \
+    == "(['broken.png', 'fake.jpg'], 'fake.jpg', False, '✗ not an image: fake.jpg')" ]] \
+    && pass "only broken files: listed and flagged, no preview" || fail "broken-only: $(cj d)"
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-carousel-broken-DP-1.png" >/dev/null
+K -k Return
+sleep 0.5
+[[ "$(cj "d['open']")" == True && "$(outsums)" == "$sums0" ]] && pass "only broken files: Enter applies nothing" \
+    || fail "broken-only Enter"
+K -k Escape
+# Qt's own decode warning, once per broken file shown since the restart (broken.png in the
+# burst, eDP-1 and broken-only opens, fake.jpg once), and nothing else.
+bad=$(warns_since "$n0" | grep -v -E 'QML Image at @wallpaper/Carousel.qml.*Error decoding: .*/(broken\.png|fake\.jpg): Unsupported image format$' || true)
+ndec=$(warns_since "$n0" | grep -c 'Carousel.qml.*Error decoding' || true)
+[[ -z "$bad" && "$ndec" == 4 ]] && pass "qs log: only $ndec thumbnail decode warning(s) for the broken files in section 9" \
+    || { fail "qs log section 9 ($ndec decode warnings)"; echo "$bad"; }
 kill -TERM "$kitty_pid" 2>/dev/null || true
 wait "$kitty_pid" 2>/dev/null || true
 kitty_pid=""
