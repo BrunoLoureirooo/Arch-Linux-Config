@@ -5,6 +5,7 @@
 //   import qs             -> Theme (singleton, registered in ./qmldir)
 //   import qs.components  -> Chamfer, Meter, Chip
 //   import qs.services    -> Stats, Screens (singletons, registered in services/qmldir)
+//   import qs.wallpaper   -> Wallpaper, WallpaperState (singleton, wallpaper/qmldir)
 //   import qs.bar / qs.rail / ...   -> the per-area directories added by later units
 // Never use relative ("../") or "root:/" imports; they break singletons and the LSP.
 //
@@ -12,8 +13,20 @@
 import QtQuick
 import Quickshell
 import qs.bar
+import qs.wallpaper
 
 ShellRoot {
+    // Wallpaper on every screen; the chosen path lives in WallpaperState.
+    Variants {
+        model: Quickshell.screens
+
+        Wallpaper {
+            required property var modelData
+            screen: modelData
+            path: WallpaperState.path
+        }
+    }
+
     Variants {
         model: Quickshell.screens
 
