@@ -1,5 +1,35 @@
 # Quickshell Terminal Desktop: Design Spec
 
+> **Superseded by implementation (2026-10-25).** The text below is the original design and is kept
+> unchanged. Where it differs from what was built, the build wins; the deviations are:
+>
+> - **Memory budget (S1) not met.** The shell measured about 345 MB PSS / 620 MB RSS in the test rig
+>   (203 MB PSS with `QT_QUICK_BACKEND=software`) against 156 MB RSS. Options are in `docs/deploy.md` section 11.
+> - **Glitch (section 8) dropped.** The spike showed about +45 MB of memory retained after it played; no
+>   glitch code is in the shell. The render page's glitch is a mock only.
+> - **Super+grave is `Super + code:49`** (the key under Esc by keycode; on the pt layout its keysym is
+>   backslash). Already reflected in section 6.
+> - **GPU row:** reads the AMD iGPU by default. An opt-in (`hl.env("RICE_NVIDIA", "1")`) starts one
+>   `nvidia-smi` stream for the GeForce RTX 3050 Ti and adds a VRM row; the "never nvidia-smi" statement in
+>   section 3 holds only for the default.
+> - **NET chip:** the default-route interface name read from `/proc/net/route`, not NetworkManager/nmcli
+>   (NetworkManager is not running on this machine). BAT shows on every screen that has a battery.
+> - **Workspace 11** is also a default workspace on the laptop panel (so it starts in its own pool).
+> - **Files:** `Chip.qml`/`Meter.qml` live in `components/` with `Chamfer.qml` (not in `bar/`), `services/Screens.qml`
+>   was added, `WallpaperState.qml` holds the wallpaper choice (with `preview`/`clearPreview` for the carousel),
+>   the rail widgets are in `rail/`. `Chamfer` is two closed filled polygons (Qt 6.11 `ShapePath` has no stroke gradient).
+> - **Rail** ignores exclusive zones; a 1 px invisible overlay surface reserves its width (direct-scanout trade-off).
+> - **`qs-supervise`** restarts qs 1 s after it exits (spec: within 2 s); xremap starts without `--watch`.
+> - **`.chezmoiignore`** also lists `**/__pycache__` and `*.pyc`; the repo has a `.gitignore`.
+> - **Palette:** a grey or black wallpaper still gets a chromatic palette from matugen (the cyan/magenta
+>   fallback is not reached end to end); `rice-palette` writes its four files all-or-nothing with rollback.
+> - **`Super+Space`** calls `qs ipc call launcher toggle`; nothing is deployed until the whole branch is applied.
+> - **Delivery:** nothing was applied to the live system. Phases that asked the owner first became the
+>   checklist in `docs/deploy.md`; verification ran in a private headless nested-Hyprland rig (`tests/rig/`).
+>   The full list of rulings is in `docs/deploy.md` section 15 and `docs/superpowers/notes/2026-10-23-sdd-ledger.md`.
+> - **Pending after the final fix wave:** `SystemClock` is to be replaced by a timer-based clock (daylight-saving
+>   finding) and the carousel's `rice-palette apply` gets a timeout (`docs/deploy.md` section 12).
+
 Date: 2026-10-23
 Status: draft for review
 Visual reference (approved look, private link): https://claude.ai/artifact/SGHt9bagiiej1rGiD5byXP

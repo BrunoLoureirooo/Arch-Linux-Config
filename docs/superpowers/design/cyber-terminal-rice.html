@@ -286,7 +286,7 @@ td:first-child{color:var(--a1);white-space:nowrap}
             <tr><td>Workspace badge with occupancy</td><td>bar</td><td>repaint on workspace event</td></tr>
             <tr><td>Corner brackets</td><td>each screen, click-through</td><td>none; optional</td></tr>
             <tr><td>Dithered wallpaper</td><td>baked into the image</td><td>none</td></tr>
-            <tr><td>Glitch on workspace switch</td><td>~250 ms shader pass over a snapshot of the screen, on the top overlay layer above every window</td><td>none at rest; GPU only for those 250 ms; off by default</td></tr>
+            <tr><td>Glitch on workspace switch</td><td>~250 ms shader pass over a snapshot of the screen, on the top overlay layer above every window</td><td>none at rest; GPU only for those 250 ms; off by default. Mock only: dropped in the build (about +45 MB of memory stayed retained after it played; see docs/superpowers/notes/2026-10-23-glitch-spike.md)</td></tr>
             <tr><td>Wallpaper-driven palette</td><td>everything</td><td>runs only when you pick a wallpaper</td></tr>
           </tbody>
         </table></div>
@@ -339,7 +339,7 @@ td:first-child{color:var(--a1);white-space:nowrap}
           <span class="dim">now</span><span>9 shared workspaces, <code>Super+1–9</code></span>
           <span class="dim">after</span><span><b>5 per screen</b>: <code>Ctrl+1–5</code> jumps (as on the Mac), <code>Ctrl+Alt+←/→</code> and the mouse side buttons step</span>
           <span class="dim">move window</span><span><code>Ctrl+Shift+1–5</code>; <code>Super+Alt+Shift+arrows</code> pushes a window past an edge to the other screen</span>
-          <span class="dim">focus</span><span><code>Super+Alt+←↑↓→</code> or <code>hjkl</code>; <code>Super+`</code> jumps screen</span>
+          <span class="dim">focus</span><span><code>Super+Alt+←↑↓→</code> or <code>hjkl</code>; <code>Super</code> + the key under Esc (<code>code:49</code>) jumps screen</span>
         </div>
       </div>
     </div>
@@ -390,7 +390,7 @@ td:first-child{color:var(--a1);white-space:nowrap}
       <div class="card">
         <div class="cmp">
           <span class="dim">measured now</span><span>waybar 79 MB + mako 24 MB + hyprpaper 53 MB = <b>156 MB</b></span>
-          <span class="dim">budget</span><span>Quickshell, all of it, at or under <b>156 MB</b> and low single-digit idle CPU</span>
+          <span class="dim">budget</span><span>Quickshell, all of it, at or under <b>156 MB</b> and low single-digit idle CPU. Not met in the build (about 345 MB PSS / 620 MB RSS in the test rig; see docs/deploy.md section 11)</span>
           <span class="dim">rule</span><span>Measure after each step. If the budget is blown, the fallback is keeping waybar and mako and using Quickshell only for the carousel and launcher.</span>
         </div>
       </div>

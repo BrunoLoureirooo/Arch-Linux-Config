@@ -1,5 +1,29 @@
 # Quickshell Terminal Desktop Implementation Plan
 
+> **Superseded by implementation (2026-10-25).** This plan is kept as written. It was executed unattended
+> with these deviations (the rulings are in `docs/deploy.md` section 15 and the ledger
+> `docs/superpowers/notes/2026-10-23-sdd-ledger.md`):
+>
+> - **Ask-first gates were not executed** (Task 0 step 4, Task 3 step 5, Task 6 step 3, Task 13 step 2,
+>   Task 20, Task 24 step 4). Nothing was applied to the live system, no package installed, no session
+>   restart, `~/.claude/settings.json` untouched; each gate became an item in `docs/deploy.md`.
+> - **Verification ran in a private headless nested-Hyprland rig** (`tests/rig/`), not on the live
+>   desktop; steps that say "apply and check on the live session" were run there or are listed UNVERIFIED.
+>   `tests/tools/uinput_keys.py` also has a CLI; the rig injects keys with `wtype`.
+> - **Task 0/3:** the live `hyprland.conf`, `hyprpaper.conf` and waybar config were ahead of the repo and were
+>   synced into the repo before porting; the Lua config ports the live files.
+> - **Task 4:** `Super+grave` became `Super + code:49`; pool binds are nil-safe; workspace 11 is also a default on the panel.
+> - **Task 10:** NET is the default-route interface from `/proc/net/route` (no nmcli); BAT on every screen with a battery.
+> - **Task 12 (and Task 10's GPU row):** the memory checkpoint failed: the 156 MB budget is not met (about 345 MB PSS in the rig);
+>   options in `docs/deploy.md` section 11. The rail's GPU row defaults to the AMD iGPU; NVIDIA is opt-in (`RICE_NVIDIA=1`).
+> - **Task 13:** `qs-supervise` replaces waybar and hyprpaper in the autostart (repo only).
+> - **Task 17:** `rice-palette` has rollback on write failure; grey wallpapers keep matugen's chromatic palette.
+> - **Task 22 (glitch): spike run, NO-GO, dropped** (about +45 MB retained memory); the plan's Step 4 to 5 "go" paths were not built.
+> - **Task 24:** the README and `docs/deploy.md` were written; deleting the retired configs is left to the owner
+>   (`docs/deploy.md` section 14). `.gitignore` was added and `.chezmoiignore` also lists `**/__pycache__` and `*.pyc`.
+> - **Pending (final fix wave):** replace `SystemClock` with a timer-based clock (daylight-saving finding);
+>   give the carousel's `rice-palette apply` a timeout.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace waybar + wofi + mako + hyprpaper with one Quickshell shell that looks like a cyberpunk terminal, give Hyprland one workspace pool per screen, and make the keyboard and mouse behave like the owner's Macs.
