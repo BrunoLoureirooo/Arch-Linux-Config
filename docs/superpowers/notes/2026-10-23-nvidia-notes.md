@@ -21,8 +21,9 @@ The NVIDIA source is opt-in with `RICE_NVIDIA=1` (see "Owner decisions").
   permanent stream would hold it awake all session for a GPU row reading about 0 %.
   Hence the AMD default and the opt-in.
 - The live Hyprland and hyprpaper hold `/dev/nvidia0` open and the card still
-  suspends: open device files do not stop runtime suspend, but nvidia-smi/NVML polling
-  does.
+  suspends: open device files do not stop runtime suspend (measured). That nvidia-smi/NVML
+  polling every 2 s keeps the card from suspending is NOT measured here (nvidia-smi was
+  never run); it is the documented and widely reported behaviour, and is assumed below.
 - It read `active` while the test rig was running. See "What wakes the card" below.
 
 ### What wakes the card (rig, sysfs reads every 5 s)
@@ -91,7 +92,8 @@ Conclusions:
   remembers the first AMD card (0x1002) and the first NVIDIA card (0x10de).
 - **Default (no `RICE_NVIDIA`, or any value other than `1`):** the GPU row uses the AMD
   sysfs file (`gpuSource = "amd"`, `"none"` without an AMD card). No NVIDIA process is
-  ever started and nothing of the NVIDIA card but its `vendor` file is read.
+  ever started, and nothing of the NVIDIA card but its `vendor` file is read: the
+  runtime_status path is not even assigned (`nvStatusPath` stays empty; tested).
 - **With `RICE_NVIDIA=1`:** NVIDIA is tried once, after that probe, only when the NVIDIA card's
   `power/runtime_status` reads exactly `active` (reading it never wakes the card). Then
   ONE long-lived process runs:
@@ -108,6 +110,12 @@ Conclusions:
   nvidia-smi is missing (exit 127 from setpriv; one info line, no warning), when it
   exits before a valid line (one warning, no retry), or when no valid line arrives
   within 6 s (one warning, the process is stopped, no retry).
+- Time of check vs time of use: `runtime_status` is read, then nvidia-smi starts a moment
+  later. If the card suspends in that gap (well under a second), nvidia-smi wakes it.
+  This is the one way the opt-in can wake a card, and only at a start or retry.
+- If `setpriv` itself were missing (it is part of util-linux, always installed on Arch),
+  Quickshell logs "Process failed to start" and Stats warns "nvidia-smi exited (-1)
+  before a valid line": the -1 is misleading, setpriv is what failed. Falls back to AMD.
 - A stream that dies after valid lines falls back to AMD (VRAM values back to -1) and is
   retried after 30 s, 60 s, 120 s, then every 300 s, each time only if
   `runtime_status` still reads `active` (otherwise nothing is started and the next step
@@ -121,24 +129,34 @@ Conclusions:
   unknown), and the value column of all rows widens to fit that text so the bars stay
   aligned. The rail column is about 210 px of 1042 px at 1080p with the VRM row, so no
   spacing change was needed.
-- Tests: the NVIDIA tests set `RICE_NVIDIA=1` explicitly and use a FAKE nvidia-smi
-  first on PATH (`tests/rig/fake-nvidia-smi.sh`, selftest-qs.sh section 11).
-  selftest-qs.sh unsets `RICE_NVIDIA` at its top, so an opted-in session cannot make
-  the other sections run the real nvidia-smi. Section 11 also checks that without the
-  opt-in (unset, or `0`) no fake is ever started, even with `runtime_status` `active` and
-  the fake on PATH.
+- Tests and the rig: `tests/rig/rig_env.sh` (sourced by `qs-run.sh`, `run.sh` and the
+  selftest's supervisor start) drops any inherited `RICE_NVIDIA`, so a rig qs never runs
+  the real nvidia-smi even from a terminal of an opted-in session. Only the rig's own
+  pass-through `RIG_NVIDIA` becomes `RICE_NVIDIA`. The NVIDIA tests (selftest-qs.sh
+  section 11) set `RIG_NVIDIA=1` and put a FAKE nvidia-smi first on PATH
+  (`tests/rig/fake-nvidia-smi.sh`). Scenario k runs the production probe path end to
+  end against a fake `/sys/class/drm` tree (`Stats.drmRoot`): the probe assigns the
+  paths, reads `active` and starts one (fake) stream; with `suspended` it reads it and
+  starts nothing. Scenario j checks that without the opt-in (unset, `0`, or an inherited
+  `RICE_NVIDIA=1` without `RIG_NVIDIA`) no fake is ever started and no NVIDIA status path
+  is assigned, even with `runtime_status` `active` and the fake on PATH.
+- Measured vs not measured: the suspend/active counters, the rig wake-up table, the
+  memory table, the Quickshell child-process and FileView behaviour, and everything in
+  this section with the FAKE nvidia-smi are measured in the rig. NOT measured: the real
+  nvidia-smi (output, first-line delay, power effect of polling), VRAM use, and memory
+  under the NVIDIA GL stack.
 
 ## Owner decisions
 
 1. **To show your 3050 Ti in the rail, add `hl.env("RICE_NVIDIA", "1")` to your Hyprland
    config** (`dot_config/hypr/hyprland.lua`, next to the other `hl.env` lines). It will
-   keep the dGPU awake while the shell runs (nvidia-smi polling every 2 s stops runtime
-   suspend), but only if the card is awake when the shell starts; a sleeping card is
-   never woken. You get a `VRM` row as well. **The default is AMD because the session
-   barely uses the dGPU** (suspended about 98.5 % of the time, see above).
-   Careful: a terminal opened in a session with that setting passes `RICE_NVIDIA=1` on
-   to anything started from it, including manual `tests/rig/qs-run.sh` runs (the
-   selftest unsets it).
+   keep the dGPU awake while the shell runs (nvidia-smi polling every 2 s is expected to
+   stop runtime suspend; not measured here), but only if the card is awake when the
+   shell starts; a sleeping card is never woken (apart from the sub-second gap above).
+   You get a `VRM` row as well. **The default is AMD because the session barely uses
+   the dGPU** (suspended about 98.5 % of the time, see above). Terminals of that session
+   inherit `RICE_NVIDIA=1`; the test rig drops it (`rig_env.sh`), so rig runs stay on AMD
+   unless a test sets `RIG_NVIDIA=1`.
 2. **Memory.** The NVIDIA-stack measurement was skipped (card asleep; see Part A). The
    NVIDIA libraries are already mapped, and already counted, in the AMD-stack numbers
    (~35 MB PSS, shared). Vendor choice will not bring the shell near 156 MB RSS; only a
