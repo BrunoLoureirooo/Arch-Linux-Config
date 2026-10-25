@@ -92,26 +92,33 @@ sudo udevadm control --reload && sudo udevadm trigger
 
 Implication: every process you run, from any login (a terminal in the session, an SSH session to
 this machine, a cron job), can read every key you type on every keyboard (a keylogger needs no
-root). Needs a full log out and in (a new login) before the group applies.
+root) and, because `/dev/uinput` becomes writable, can also inject keystrokes (type commands into
+a terminal). Needs a full log out and in (a new login) before the group applies.
 
 **Option B: udev rule with `uaccess`, no group.**
 
 ```sh
-sudo tee /etc/udev/rules.d/99-xremap.rules <<'RULES'
+sudo tee /etc/udev/rules.d/70-xremap.rules <<'RULES'
 SUBSYSTEM=="input", KERNEL=="event*", TAG+="uaccess"
 KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
 RULES
 sudo udevadm control --reload && sudo udevadm trigger
 ```
 
-Implication: the user logged in at the local seat gets an ACL on all input devices; SSH sessions and
-cron jobs do not. Still a keylogger risk for anything running in your graphical session. Log out and
+The file name matters: systemd turns the `uaccess` tag into ACLs in `73-seat-late.rules`, so a rule
+file sorted after 73 (such as `99-...`) adds a tag that is never acted on and you end up with no ACLs
+and an xremap that silently does nothing. Keep the number below 73.
+
+Implication: the user logged in at the local seat gets an ACL on all input devices (read every key)
+and on `/dev/uinput` (inject keystrokes); SSH sessions and cron jobs do not. Still a keylogger and
+key-injection risk for anything running in your graphical session. Log out and
 in so the ACLs apply to the new session. Note: both rule sets follow xremap's documented setup and
 systemd's `uaccess` convention; they were not run during the build (no sudo was available), so check
 `ls -l /dev/uinput` and `getfacl /dev/input/event*` after applying.
 
-Check after re-login: `xremap --list-windows` should work without sudo, and `pgrep -a xremap` should
-show the process after Hyprland starts.
+Check after re-login: `xremap --list-devices` lists your keyboards and mouse without sudo (this is the
+permission test; `xremap --list-windows` only queries the compositor for window class names and does
+not test device access), and `pgrep -a xremap` should show the process after Hyprland starts.
 
 **Hot-plug caveat.** The autostart line runs `xremap ~/.config/xremap/config.yml` without
 `--watch`, so a keyboard plugged in after xremap started (a dock keyboard) is not remapped until
@@ -119,28 +126,33 @@ xremap is restarted. If that matters to you, change the line in `dot_config/hypr
 `hl.exec_cmd("xremap --watch ~/.config/xremap/config.yml")` (see `xremap --help` for the `--watch`
 targets) and re-apply. This was left off on purpose and is untested.
 
-## 4. Back up, diff, apply, log out and in
+## 4. Diff, back up, apply, log out and in
 
-Back up everything that will change, with the pattern you already use:
-
-```sh
-stamp=$(date +%Y%m%d-%H%M%S)
-for f in ~/.config/hypr/hyprland.conf ~/.config/hypr/hyprpaper.conf \
-         ~/.config/waybar/config.jsonc ~/.config/waybar/style.css \
-         ~/.config/wofi/config ~/.config/wofi/style.css \
-         ~/.config/kitty/kitty.conf ~/.config/btop/btop.conf; do
-  [ -e "$f" ] && cp -a "$f" "$f.bak.$stamp"
-done
-ls ~/.config/hypr/*.bak.* ~/.config/waybar/*.bak.* 2>/dev/null
-```
-
-Look at what chezmoi would do before doing it. The live `~/.config/hypr` may have drifted since the
-repo copy was synced from it (the build synced live to repo once, on 2026-10-23, before porting):
+First look at what chezmoi would do. The live `~/.config/hypr` may have drifted since the repo copy
+was synced from it (the build synced live to repo once, on 2026-10-23, before porting), and so may
+other managed files (`~/.bashrc`, `~/.gitconfig`, nvim, the caddy/plex/vpn-torrenting compose files,
+btop):
 
 ```sh
 chezmoi diff | less -R         # read it all
 chezmoi status
 ```
+
+Then back up with the pattern you already use. Either snapshot every managed target that exists
+(simplest and complete), or only the ones `chezmoi status` shows as modified:
+
+```sh
+stamp=$(date +%Y%m%d-%H%M%S)
+# all managed files that exist now (directories are skipped):
+chezmoi managed --include=files --path-style=absolute | while read -r f; do
+  [ -f "$f" ] && cp -a "$f" "$f.bak.$stamp"
+done
+ls ~/.config/hypr/*.bak.* ~/.config/waybar/*.bak.* 2>/dev/null
+```
+
+(Whichever way you choose, `hyprland.conf`, `hyprpaper.conf`, the waybar and wofi files, and anything
+`chezmoi status` marks as modified must be covered: section 13 restores from these backups. Delete
+the `*.bak.*` files you no longer need later; chezmoi ignores them.)
 
 Expected: new files (hyprland.lua, binds.lua, autostart.lua, lib/pools.lua, quickshell/*,
 xremap/config.yml, kitty/*, the three `~/.local/bin` tools, `~/.local/share/rice/*.py`) and a changed
@@ -195,8 +207,9 @@ Do these in order. Anything that fails: note it, and use section 13 if the deskt
    ```
 
    Expect the first event to disable `eDP-1` (the panel goes dark, its workspaces move to the BenQ)
-   and the second to re-enable it. Do NOT fire `SW_LID` unless `HandleLidSwitch` reads `ignore`: if it
-   does not, the machine really suspends. Recipe (python3, no root because `/dev/uinput` is writable
+   and the second to re-enable it. Do NOT fire `SW_LID` unless `HandleLidSwitch`, `HandleLidSwitchExternalPower`
+   and `HandleLidSwitchDocked` all read `ignore` (query each with the `busctl get-property` command
+   above): if one does not, the machine really suspends. Recipe (python3, no root because `/dev/uinput` is writable
    for you; adapted from your note, NOT run by the author):
 
    ```python
@@ -234,6 +247,16 @@ Do these in order. Anything that fails: note it, and use section 13 if the deskt
    scroll with Left/Right (the wallpaper previews live), Enter applies (runs `rice-palette apply`,
    recolours kitty, Hyprland borders and the shell), Escape reverts. Or from a terminal:
    `rice-palette apply ~/Pictures/wallpapers/<image>`.
+   **Check that `rice-palette` is found from inside the shell.** The carousel runs a bare
+   `rice-palette` (`derive` while scrolling, `apply` on Enter), and `~/.local/bin` is only on PATH in
+   interactive shells (`.bashrc` returns early otherwise). Open the carousel, scroll, press Enter: if the
+   previews do not recolour, or Enter shows an error, PATH is the cause (known issue in section 12, fix
+   scheduled). Workarounds: start Hyprland from a login shell that has `~/.local/bin` on PATH, or put it
+   on PATH for everything Hyprland starts with a line next to the other `hl.env` lines in
+   `dot_config/hypr/hyprland.lua`, for example
+   `hl.env("PATH", "/home/vyrus-extreme/.local/bin:" .. (os.getenv("PATH") or "/usr/local/bin:/usr/bin"))`
+   (same `hl.env(name, value)` form as the existing lines; the PATH line itself is untested).
+   A symlink into `/usr/local/bin` is not recommended.
 9. **Toasts replace mako.** `pgrep -x mako` must print nothing and the shell must own the notification
    name: `notify-send "test" "hello"` shows a cut-corner toast at the bottom-right of the main screen;
    a click dismisses it; at most three at once. `busctl --user list | grep Notifications` shows the owner.
@@ -442,6 +465,11 @@ trade-off, not planned to change. The controller revises this block after the fi
   holds the exclusive keyboard grab and ignores Escape; a hung apply would lock the keyboard until qs is
   killed (`qs-supervise` restarts it; from a TTY: `pkill -x qs`). Scheduled hardening: let Escape close
   during an apply and/or add a timeout of about 10 s.
+- **Carousel calls a bare `rice-palette`. [scheduled for fix]** `wallpaper/Carousel.qml` runs
+  `rice-palette derive` and `rice-palette apply` by name, which only resolves if `~/.local/bin` is on the PATH
+  of the Hyprland session (`.bashrc` is not read by non-interactive shells). If not, live previews and Enter
+  fail. Scheduled fix: call `$HOME/.local/bin/rice-palette` by absolute path, as `autostart.lua` does.
+  Workaround until then: checklist item 8 in section 5.
 - **Test hygiene. [scheduled for fix]** `tests/rig/selftest-qs.sh` runs the real
   `claude-limits-statusline` with the real `HOME`; to be prefixed with the staged HOME. Test-only.
 - **Glitch effect dropped. [accepted/known]** The workspace-switch glitch was evaluated and dropped: idle
@@ -476,6 +504,17 @@ trade-off, not planned to change. The controller revises this block after the fi
 Back to waybar + wofi + mako + hyprpaper and the old `hyprland.conf`. Use a TTY (`Ctrl+Alt+F3`) if the
 session is unusable. Backups are `<file>.bak.<stamp>` next to the originals (section 4).
 
+**Step 0: switch the chezmoi source back first**, or the next routine `chezmoi apply` brings
+`hyprland.lua` and everything else back. While the source is still on the feature branch:
+
+```sh
+git -C ~/.local/share/chezmoi switch main      # the feature branch is feat/quickshell-terminal-desktop
+```
+
+If you already merged the branch into main, revert the merge in the repo instead (or run `chezmoi
+apply` only for the paths you want, with the rollback files in place and `hyprland.lua` removed from
+the source). Only then do the steps below.
+
 ```sh
 # 1. stop the new pieces (the supervisor first, or it restarts qs)
 pkill -f qs-supervise; pkill -x qs
@@ -493,9 +532,10 @@ cp -a ~/.config/hypr/hyprland.conf.bak.<stamp> ~/.config/hypr/hyprland.conf
 cp -a ~/.config/waybar/config.jsonc.bak.<stamp> ~/.config/waybar/config.jsonc
 cp -a ~/.config/hypr/hyprpaper.conf.bak.<stamp> ~/.config/hypr/hyprpaper.conf
 
-# 5. reload, then start the old programs now (or log out and in)
-hyprctl reload
-(waybar &) ; (mako &) ; (hyprpaper &) ; disown -a
+# 5. log out of Hyprland and log in again. Falling back to hyprland.conf starts the old programs
+#    through its exec-once lines. (From a TTY, hyprctl and waybar need HYPRLAND_INSTANCE_SIGNATURE and
+#    WAYLAND_DISPLAY and will not work; and whether a plain `hyprctl reload` inside the running session
+#    drops the Lua config is untested, so log out and in.)
 ```
 
 `hyprland.conf` still contains the `exec-once` lines for `mako`, `waybar`, `blueman-applet`, `librepods`,
@@ -582,6 +622,7 @@ Nothing below was observed on your machine. "Rig" means the headless nested Hypr
 - Your actual wallpapers (JPEG/WebP size parsing is covered by fixtures only), the carousel under rapid scrolling, the startup wallpaper race (guarded but never reproduced).
 - Media players other than the one the rig could read; the rail with a 15 % battery row; real PipeWire volume changes; clicking a bar cell with a real pointer.
 - Real connected Bluetooth devices and their battery values (none were connected during the build); whether BlueZ reports a single AirPods level at all.
+- The carousel finding `rice-palette` on the Hyprland session's PATH (it runs a bare `rice-palette`; the PATH of a session started outside an interactive shell was not checked).
 - A real Claude Code session feeding the cache, and whether your plan reports `rate_limits`; the 30 s missing-file re-read of the Claude cache via the timer path (seen working once by hand).
 - Whether the glvnd NVIDIA EGL probe in qs wakes the dGPU.
 - Real `nvidia-smi` streaming (format, locale, first line within 6 s, death under `pdeathsig`), real VRAM numbers, the power/battery effect of the stream, that the card is `active` at login, hot reload while the stream runs; qs memory on the NVIDIA GL stack.
