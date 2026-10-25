@@ -1,7 +1,8 @@
 // Rail SYS section (render .row3 .sg .spw .netl): CPU, MEM, GPU rows as
-// `LABEL [10 segments] value` (GPU hidden when there is no AMD GPU), then the network
-// sparkline over Stats.netHistory (one polyline over a faint a1 area, a2 end dot,
-// scaled to the window's maximum) and the caption `up <rate>  <iface>  down <rate>`.
+// `LABEL [10 segments] value` (GPU hidden when Stats has no GPU source or no value),
+// plus a VRM row (`1.0/4.0G`) while the GPU source is the NVIDIA stream; then the
+// network sparkline over Stats.netHistory (one polyline over a faint a1 area, a2 end
+// dot, scaled to the window's maximum) and the caption `up <rate>  <iface>  down <rate>`.
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Shapes
@@ -12,6 +13,25 @@ ColumnLayout {
     id: root
 
     property real px: Theme.px
+    readonly property bool vram: Stats.gpuSource === "nvidia"
+    // Value column, the same for every row so the bars line up: wide enough for the
+    // VRM text while that row is shown.
+    readonly property real valueWidth: vram ? Math.ceil(vramMetrics.width) : Math.round(px * 2.6)
+
+    // MiB -> "1.0/4.0G" (one decimal below 10 GiB, whole GiB above), "--" when unknown.
+    function vramText(used, total) {
+        if (!(used >= 0) || !(total > 0))
+            return "--";
+        const g = v => v / 1024 < 10 ? (v / 1024).toFixed(1) : String(Math.round(v / 1024));
+        return g(used) + "/" + g(total) + "G";
+    }
+
+    TextMetrics {
+        id: vramMetrics
+        font.family: Theme.font
+        font.pixelSize: root.px
+        text: "0.0/0.0G"
+    }
 
     spacing: Math.round(px * 0.15)
 
@@ -61,7 +81,7 @@ ColumnLayout {
         }
 
         Text {
-            Layout.preferredWidth: Math.round(root.px * 2.6)
+            Layout.preferredWidth: root.valueWidth
             horizontalAlignment: Text.AlignRight
             text: row.text
             color: Theme.fg
@@ -83,10 +103,17 @@ ColumnLayout {
     }
 
     StatRow {
-        visible: Stats.gpu >= 0
+        visible: Stats.gpuSource !== "none" && Stats.gpu >= 0
         label: "GPU"
         value: Math.max(0, Stats.gpu)
         text: Math.round(Stats.gpu) + "%"
+    }
+
+    StatRow {
+        visible: root.vram
+        label: "VRM"
+        value: Math.max(0, Stats.vramPct)
+        text: root.vramText(Stats.vramUsedMb, Stats.vramTotalMb)
     }
 
     // Sparkline. Points are recomputed only when netHistory changes (every 2 s).
