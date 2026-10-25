@@ -373,7 +373,7 @@ windows during the build.
 
 1. In kitty: run `sleep 100`, press `Ctrl+C`: the process is interrupted (SIGINT), nothing is pasted or copied.
 2. In kitty: select text, press `Super+C`, then `Super+V` in the prompt: the text is pasted. `Ctrl+Shift+C/V` still work.
-3. In kitty: `Super+T` opens a tab, `Super+W` closes it, `Super+N` opens a new window; `Ctrl+Left/Right` and `Home/End` behave normally in the shell.
+3. In kitty: `Super+T` opens a tab, `Super+W` closes it, `Super+N` opens a new window; `Ctrl+Left/Right` and `Home/End` behave normally in the shell. With `sleep 100` running in a tab, `Super+W` (and `Super+Q` on the window) must ask before closing: kitty's default `confirm_os_window_close -1` asks only when a command is running, which needs kitty's shell integration (on by default for bash); without it kitty asks for every tab (seen in the test rig).
 4. In Firefox and VS Code: `Super+C/V/X/A/Z/F/S` act as `Ctrl+` the same key; `Super+Left/Right` go to line start/end; `Alt+Left/Right` move by word (note: `Alt+Left` in Firefox no longer means Back).
 5. In a JetBrains IDE: repeat 4; check `Super+arrows`, `Alt+arrows` and `Alt+Backspace`; confirm with `hyprctl clients` that the class names are matched (kitty is excluded by class `kitty`; `xremap --list-windows` prints the names xremap sees).
 6. Confirm `Ctrl+1..5`, `Ctrl+Alt+arrows` and `Super+Space` still trigger Hyprland binds and are not triggered by any remapped key.
