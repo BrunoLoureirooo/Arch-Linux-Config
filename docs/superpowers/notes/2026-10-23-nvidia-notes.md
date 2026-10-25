@@ -5,13 +5,24 @@ The laptop has two GPUs: the AMD Cezanne iGPU (boot display) and an NVIDIA GeFor
 `auto`). This note records how the shell treats the NVIDIA card, what the memory
 measurements say, and the decisions left to the owner.
 
+**Default: the rail's GPU row reads the AMD iGPU** (the chip that drives the display).
+The NVIDIA source is opt-in with `RICE_NVIDIA=1` (see "Owner decisions").
+
 ## Power state seen on this machine (sysfs only, read-only)
 
-- `power/runtime_status` of the NVIDIA PCI device read `suspended` at the start of U15
-  (three reads 2 s apart), with `runtime_suspended_time` about 635,000 s against
-  `runtime_active_time` about 9,900 s since boot. **The dGPU sleeps most of the time**:
-  the session does not keep it busy, although the live Hyprland and hyprpaper hold
-  `/dev/nvidia0` open (open device files do not stop the card from suspending).
+- On 2026-10-25 at 01:41:48-01:41:52 WEST, three reads 2 s apart of the NVIDIA PCI
+  device's `power/` files gave: `runtime_status` = `suspended`, `control` = `auto`,
+  `runtime_suspended_time` = 634,941,149 ms (then 634,943,154 and 634,945,159),
+  `runtime_active_time` = 9,897,830 ms (unchanged). That is about 176 h suspended
+  against 2.7 h active since boot: **the dGPU is suspended about 98.5 % of the time.**
+- Corrected premise: the U15 brief assumed the session already keeps the dGPU awake
+  (because the Hyprland config sets the NVIDIA GLX/GBM variables), so an nvidia-smi
+  stream would cost nothing. It does not. The session barely uses the dGPU, and a
+  permanent stream would hold it awake all session for a GPU row reading about 0 %.
+  Hence the AMD default and the opt-in.
+- The live Hyprland and hyprpaper hold `/dev/nvidia0` open and the card still
+  suspends: open device files do not stop runtime suspend, but nvidia-smi/NVML polling
+  does.
 - It read `active` while the test rig was running. See "What wakes the card" below.
 
 ### What wakes the card (rig, sysfs reads every 5 s)
@@ -20,12 +31,12 @@ measurements say, and the decisions left to the owner.
 |---|---|
 | rig stopped | `active` for ~20 s, then `suspending`, then `suspended` |
 | nested rig started (labwc + nested Hyprland, NVIDIA EGL loaded through glvnd) | `active` for ~20 s, then `suspended` |
-| plus a small `qs` window on the default stack (Mesa EGL, RICE_NO_NVIDIA=1) | stays `suspended` for 40 s |
+| plus a small `qs` window on the default stack (Mesa EGL, NVIDIA source off) | stays `suspended` for 40 s |
 
 So starting a compositor wakes the card for about 20 s, and a Quickshell process on
 the default stack does not. **At login the card is therefore probably `active` for the
-first ~20 s, while the shell starts.** If the shell starts in that window, the NVIDIA
-stream starts too and keeps the card awake for the whole session (owner decision 1).
+first ~20 s, while the shell starts.** With the opt-in set, the stream would start in
+that window and keep the card awake for the whole session.
 
 ## Part A: memory under the NVIDIA GL stack: SKIPPED
 
@@ -78,7 +89,10 @@ Conclusions:
   (0-100), all -1 when unknown.
 - At start Stats reads only the `vendor` file of `/sys/class/drm/card0..15/device` and
   remembers the first AMD card (0x1002) and the first NVIDIA card (0x10de).
-- NVIDIA is tried once, after that probe, only when the NVIDIA card's
+- **Default (no `RICE_NVIDIA`, or any value other than `1`):** the GPU row uses the AMD
+  sysfs file (`gpuSource = "amd"`, `"none"` without an AMD card). No NVIDIA process is
+  ever started and nothing of the NVIDIA card but its `vendor` file is read.
+- **With `RICE_NVIDIA=1`:** NVIDIA is tried once, after that probe, only when the NVIDIA card's
   `power/runtime_status` reads exactly `active` (reading it never wakes the card). Then
   ONE long-lived process runs:
   `setpriv --pdeathsig TERM -- nvidia-smi -l 2 --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits`.
@@ -107,26 +121,49 @@ Conclusions:
   unknown), and the value column of all rows widens to fit that text so the bars stay
   aligned. The rail column is about 210 px of 1042 px at 1080p with the VRM row, so no
   spacing change was needed.
-- `RICE_NO_NVIDIA` set to any non-empty value skips NVIDIA entirely. The test rig sets
-  it by default (`tests/rig/rig_env.sh`) so no test ever runs the real nvidia-smi; the
-  NVIDIA tests use a FAKE nvidia-smi (`tests/rig/fake-nvidia-smi.sh`, selftest-qs.sh
-  section 11).
+- Tests: the NVIDIA tests set `RICE_NVIDIA=1` explicitly and use a FAKE nvidia-smi
+  first on PATH (`tests/rig/fake-nvidia-smi.sh`, selftest-qs.sh section 11).
+  selftest-qs.sh unsets `RICE_NVIDIA` at its top, so an opted-in session cannot make
+  the other sections run the real nvidia-smi. Section 11 also checks that without the
+  opt-in (unset, or `0`) no fake is ever started, even with `runtime_status` `active` and
+  the fake on PATH.
 
 ## Owner decisions
 
-1. **The NVIDIA stream keeps the dGPU awake while the shell runs.** nvidia-smi polling
-   every 2 s stops the card from runtime-suspending. The brief assumed this is free
-   because the session already uses the card, but the counters above show the card is
-   suspended most of the time, so this probably costs battery whenever the shell starts
-   while the card happens to be awake. To keep the dGPU free to suspend, use the AMD
-   source only. Either:
-   - add `hl.env("RICE_NO_NVIDIA", "1")` to `dot_config/hypr/hyprland.lua` (no QML
-     change), or
-   - change `readonly property bool nvAllowed: ...` in
-     `dot_config/quickshell/services/Stats.qml` to `readonly property bool nvAllowed: false`.
-   With either, the GPU row shows the AMD iGPU's load and there is no VRM row.
+1. **To show your 3050 Ti in the rail, add `hl.env("RICE_NVIDIA", "1")` to your Hyprland
+   config** (`dot_config/hypr/hyprland.lua`, next to the other `hl.env` lines). It will
+   keep the dGPU awake while the shell runs (nvidia-smi polling every 2 s stops runtime
+   suspend), but only if the card is awake when the shell starts; a sleeping card is
+   never woken. You get a `VRM` row as well. **The default is AMD because the session
+   barely uses the dGPU** (suspended about 98.5 % of the time, see above).
+   Careful: a terminal opened in a session with that setting passes `RICE_NVIDIA=1` on
+   to anything started from it, including manual `tests/rig/qs-run.sh` runs (the
+   selftest unsets it).
 2. **Memory.** The NVIDIA-stack measurement was skipped (card asleep; see Part A). The
    NVIDIA libraries are already mapped, and already counted, in the AMD-stack numbers
    (~35 MB PSS, shared). Vendor choice will not bring the shell near 156 MB RSS; only a
    lighter renderer (U9: `QT_QUICK_BACKEND=software`, ~203 MB PSS) or fewer features
    would. The NVIDIA stream adds one nvidia-smi process on top.
+
+## Separate finding: Quickshell SystemClock and the autumn DST change (not fixed here)
+
+- What: during the repeated hour after the autumn clock change, Quickshell 0.3.1's
+  `SystemClock` floods the log with
+  `WARN: QTimer::start: negative intervals aren't allowed; the interval will be set to 1ms.`,
+  about 2,200 lines/s, with qs at about 30 % CPU.
+- How it was seen: on 2026-10-25 the local clock (Europe/Lisbon) went from 02:00 WEST
+  back to 01:00 WET in the middle of a `tests/rig/selftest-qs.sh` run. From then on
+  every qs log filled with that warning. Section 10 and six section 11 "no WARN" checks
+  failed, although a section 11 run before 02:00 had passed with no warnings. At
+  01:0x WET a fresh production `shell.qml` in the rig (`tests/rig/qs-run.sh start`) logged
+  6,516 such lines after 3 s and 28,520 after 13 s (`qs-run.sh log | grep -c`), and
+  `top -b -n 2 -d 3 -p <qs pid>` showed 29.5 % CPU. A full rerun at 02:01 WET
+  passed with no warnings.
+- Where: the only `SystemClock` users are `dot_config/quickshell/bar/Bar.qml` (line ~50)
+  and `dot_config/quickshell/rail/ClockWidget.qml` (line ~17), both
+  `precision: SystemClock.Minutes`. Their next-minute timer evidently computes a
+  negative interval while local time repeats.
+- Impact: once a year, for one hour, the live shell burns CPU and grows its log, and
+  any selftest run in that hour fails. The final fix wave should replace these
+  `SystemClock`s (for example with a plain `Timer` re-armed from `Date` arithmetic in
+  UTC milliseconds), then re-check with a faked clock.
