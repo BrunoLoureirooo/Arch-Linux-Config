@@ -31,16 +31,17 @@
 #      edits, the real status line writer, the 30 s timer, all five rail sections fit.
 #  11. NVIDIA GPU source (through tests/rig/nvidia-test.qml, a FAKE nvidia-smi): parser
 #      fixtures, stream values and the VRM row, [N/A], timeout, immediate exit, back-off
-#      restarts, runtime_status not active, missing command, no fake left after qs stops.
+#      restarts, runtime_status not active, missing command, the probe path on a fake drm
+#      tree, opt-in off by default and the rig guard, no fake left after qs stops.
 # Every qs this script starts runs on a private session bus (qs-run.sh starts its own
 # when none is given), so the shell's NotificationServer never meets the live mako.
 # Needs no running rig (starts and stops its own). Screenshots land in
 # ~/.cache/rice-testbin/shots/qs-*.png. Exit 0 = all checks passed.
 set -euo pipefail
-# The NVIDIA stream is opt-in (RICE_NVIDIA=1); a terminal of a session that opted in
-# would pass it on to every qs here and run the real nvidia-smi. Only section 11 sets
-# it, with a FAKE nvidia-smi first on PATH.
-unset RICE_NVIDIA
+# The NVIDIA stream is opt-in (RICE_NVIDIA=1). rig_env.sh drops an inherited RICE_NVIDIA
+# and passes on only RIG_NVIDIA; only section 11 sets that, with a FAKE nvidia-smi first
+# on PATH.
+unset RICE_NVIDIA RIG_NVIDIA
 R="$(dirname "$(realpath "$0")")"
 TB="${RICE_TESTBIN:-$HOME/.cache/rice-testbin}"
 SHOTS="$TB/shots"
@@ -1474,8 +1475,9 @@ bad=$(warns_since "$n0")
 
 # --- 11. NVIDIA GPU source (U15) -------------------------------------------------------
 # Through tests/rig/nvidia-test.qml with a FAKE nvidia-smi (tests/rig/fake-nvidia-smi.sh)
-# first on PATH; the real nvidia-smi never runs here. Every qs below is started with the
-# opt-in RICE_NVIDIA=1 except in scenario j (the default: no RICE_NVIDIA). The fake logs
+# first on PATH; the real nvidia-smi never runs here. Every qs below gets the opt-in
+# RICE_NVIDIA=1 through the rig pass-through RIG_NVIDIA=1 (rig_env.sh drops a plain
+# inherited RICE_NVIDIA), except in scenario j (the default, and the guard). The fake logs
 # each start (PID, time, args) so starts are counted and every fake PID is checked dead
 # after its qs stops.
 nvbin="$tmp/nvbin"
@@ -1499,7 +1501,7 @@ NVCMD="-l 2 --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,no
 nvpath="$nvbin:$(printenv PATH)"
 nv_start() {
     : >"$nvlog"
-    env RICE_NVIDIA=1 FAKE_NV_LOG="$nvlog" PATH="$nvpath" "$@" \
+    env RIG_NVIDIA=1 FAKE_NV_LOG="$nvlog" PATH="$nvpath" "$@" \
         "$R/qs-run.sh" start --entry "$R/nvidia-test.qml" >/dev/null
 }
 nvj() { "$R/qs-run.sh" ipc call nv get | spy "$1"; }
@@ -1656,14 +1658,51 @@ nv_stop "not active"
 
 # h. The real card's runtime_status (read only): the probe finds it; the fake is started
 # only if the card is active right now (it usually sleeps on this machine).
+# nvState must have left "checking": the status read completed (a dropped load would
+# leave it "checking" with 0 starts, which the start count alone cannot tell apart).
+# The rig start wakes the card for ~20 s, so its status is sampled right before and 6 s
+# after the start; if it changed in between, either consistent outcome is accepted.
+real_status() { [[ -n "$nvcard" ]] && cat "$nvcard" || echo none; }
+rs0=$(real_status)
 nv_start
 sleep 6
-real_status=$([[ -n "$nvcard" ]] && cat "$nvcard" || echo none)
-want_starts=$([[ "$real_status" == active ]] && echo 1 || echo 0)
-[[ "$(nvj "d['nvStatusPath']")" == "$nvcard" && "$(starts)" == "$want_starts" ]] \
-    && pass "real sysfs: probe found ${nvcard:-no NVIDIA card}, status '$real_status' -> $want_starts start(s)" \
-    || fail "real sysfs: $(nvj "d['nvStatusPath']") $(starts) starts (status $real_status)"
+rs1=$(real_status)
+got_h="$(nvj "d['nvStatusPath']") $(nvj "d['nvState']") $(starts)"
+ok_h=""
+for st in "$rs0" "$rs1"; do
+    [[ "$st" == active ]] && w="live 1" || w="off 0"
+    [[ "$got_h" == "$nvcard $w" ]] && ok_h=1
+done
+[[ -n "$ok_h" ]] \
+    && pass "real sysfs: probe found ${nvcard:-no NVIDIA card}, status read ($rs0 -> $rs1): nvState/starts '${got_h#* }'" \
+    || fail "real sysfs: '$got_h' (status $rs0 -> $rs1)"
 nv_stop "real sysfs"
+
+# k. The production probe path end to end: Stats.drmRoot (the test config's only hook
+# here) points the card probe at a fake /sys/class/drm tree (card1 NVIDIA, card2 AMD with
+# gpu_busy_percent 33). The probe itself assigns both paths and reads runtime_status.
+drm="$tmp/drm"
+mkdir -p "$drm/card1/device/power" "$drm/card2/device"
+echo 0x10de >"$drm/card1/device/vendor"
+echo 0x1002 >"$drm/card2/device/vendor"
+echo 33 >"$drm/card2/device/gpu_busy_percent"
+echo active >"$drm/card1/device/power/runtime_status"
+nv_start NVT_DRM="$drm"
+nv_wait 8 "d['gpuSource'] == 'nvidia'" || true   # the checks below report what was reached
+[[ "$(nvj "(d['nvStatusPath'], d['gpuPath'], d['nvState'], d['gpu'], d['vramUsedMb'])")" \
+    == "('$drm/card1/device/power/runtime_status', '$drm/card2/device/gpu_busy_percent', 'live', 42, 1536)" \
+    && "$(starts)" == 1 ]] \
+    && pass "probe path: fake drm tree -> runtime_status 'active' read by the probe -> one stream, gpu 42 / 1536 MiB" \
+    || fail "probe path active: $(starts) starts $(nvj d)"
+nv_stop "probe path active"
+echo suspended >"$drm/card1/device/power/runtime_status"
+nv_start NVT_DRM="$drm"
+nv_wait 6 "d['nvState'] == 'off'" || true
+[[ "$(nvj "(d['nvStatusPath'], d['nvState'], d['gpuSource'], d['gpu'])")" \
+    == "('$drm/card1/device/power/runtime_status', 'off', 'amd', 33)" && "$(starts)" == 0 ]] \
+    && pass "probe path: runtime_status 'suspended' read (nvState off), no start, AMD 33% from the tree" \
+    || fail "probe path suspended: $(starts) starts $(nvj d)"
+nv_stop "probe path suspended"
 
 # i. nvidia-smi missing: the fallback, no warning, one info line.
 echo active >"$nvst"
@@ -1673,22 +1712,26 @@ nv_wait 4 "d['nvState'] == 'off'" && [[ "$(nvj "$fallback_ok")" == True && "$(st
     && pass "nvidia-smi not on PATH: $want_src_fallback, no WARN/ERROR, one info line" || { fail "missing: $(nvj d)"; nv_warns; }
 nv_stop "missing nvidia-smi"
 
-# j. The default: NVIDIA is opt-in. Without RICE_NVIDIA (and with RICE_NVIDIA=0) no fake is
-# ever started, although runtime_status says "active" and the fake is first on PATH.
-echo active >"$nvst"
-for optin in unset 0; do
+# j. The default: NVIDIA is opt-in. With the fake drm tree saying "active" and the fake
+# first on PATH, no fake is ever started and no NVIDIA status path is even assigned:
+#   none    no RICE_NVIDIA, no RIG_NVIDIA
+#   zero    RIG_NVIDIA=0 (qs sees RICE_NVIDIA=0)
+#   guard   RICE_NVIDIA=1 inherited from an opted-in session, without RIG_NVIDIA: the rig
+#           (rig_env.sh) must drop it, or any ad-hoc qs-run.sh would run the real one
+echo active >"$drm/card1/device/power/runtime_status"
+for optin in none zero guard; do
     : >"$nvlog"
-    if [[ $optin == unset ]]; then
-        env -u RICE_NVIDIA FAKE_NV_LOG="$nvlog" PATH="$nvpath" NVT_STATUS="$nvst" \
-            "$R/qs-run.sh" start --entry "$R/nvidia-test.qml" >/dev/null
-    else
-        env RICE_NVIDIA="$optin" FAKE_NV_LOG="$nvlog" PATH="$nvpath" NVT_STATUS="$nvst" \
-            "$R/qs-run.sh" start --entry "$R/nvidia-test.qml" >/dev/null
-    fi
+    case $optin in
+        none) ev=(env -u RICE_NVIDIA -u RIG_NVIDIA) ;;
+        zero) ev=(env -u RICE_NVIDIA RIG_NVIDIA=0) ;;
+        guard) ev=(env -u RIG_NVIDIA RICE_NVIDIA=1) ;;
+    esac
+    "${ev[@]}" FAKE_NV_LOG="$nvlog" PATH="$nvpath" NVT_DRM="$drm" \
+        "$R/qs-run.sh" start --entry "$R/nvidia-test.qml" >/dev/null
     sleep 8
-    [[ "$(starts)" == 0 && "$(nvj "(d['nvAllowed'], d['nvState'], d['gpuSource'], d['rows'][3]['visible'])")" \
-        == "(False, 'off', '$want_src_fallback', False)" ]] \
-        && pass "RICE_NVIDIA $optin (default off): status active + fake on PATH, still no start, $want_src_fallback, no VRM row" \
+    [[ "$(starts)" == 0 && "$(nvj "(d['nvAllowed'], d['nvStatusPath'], d['nvState'], d['gpuSource'], d['gpu'], d['rows'][3]['visible'])")" \
+        == "(False, '', 'off', 'amd', 33, False)" ]] \
+        && pass "default off ($optin): runtime_status active + fake on PATH, still no start, no NVIDIA status path, AMD 33%, no VRM row" \
         || fail "default off ($optin): $(starts) starts $(nvj d)"
     nv_stop "default off ($optin)"
 done

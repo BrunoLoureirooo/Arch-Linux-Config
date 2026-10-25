@@ -6,7 +6,9 @@
 //   NVT_SMI=<command>        Stats.nvSmiCommand (e.g. a name that is not on PATH)
 //   NVT_BACKOFF=<ms,ms,...>  Stats.nvBackoff (shortened retry steps)
 //   NVT_TIMEOUT=<ms>         Stats.nvStartTimeout
-// Run with RICE_NVIDIA=1 (the opt-in) and a FAKE nvidia-smi first on PATH:
+//   NVT_DRM=<dir>            Stats.drmRoot (a fake /sys/class/drm tree for the card probe)
+// Run with RIG_NVIDIA=1 (the rig passes it on as the opt-in RICE_NVIDIA=1) and a FAKE
+// nvidia-smi first on PATH:
 //   tests/rig/qs-run.sh start --entry tests/rig/nvidia-test.qml
 //   qs-run.sh ipc call nv get     -> Stats GPU state, the SYS rows on screen, rail fit
 //   qs-run.sh ipc call nv parse   -> Stats.parseNvLine / SysWidget.vramText on fixtures
@@ -46,6 +48,8 @@ ShellRoot {
 
     Component.onCompleted: {
         const env = k => Quickshell.env(k) ?? "";
+        if (env("NVT_DRM") !== "")
+            Stats.drmRoot = env("NVT_DRM");
         if (env("NVT_STATUS") !== "")
             Stats.nvStatusPath = env("NVT_STATUS");
         if (env("NVT_SMI") !== "")
