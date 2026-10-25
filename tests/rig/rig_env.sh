@@ -33,6 +33,3 @@ _rig_lock="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/$HYPRLAND_INSTANCE_SIGNAT
 kill -0 "$NESTED_PID" 2>/dev/null || rig_die "nested Hyprland (pid $NESTED_PID) is not running"
 unset _rig_lock
 export QT_QPA_PLATFORM=wayland
-# Stats never starts nvidia-smi in the rig unless a test asks for it by setting
-# RICE_NO_NVIDIA= (empty) with a FAKE nvidia-smi first on PATH (selftest-qs.sh, U15).
-export RICE_NO_NVIDIA="${RICE_NO_NVIDIA-1}"

@@ -9,10 +9,13 @@ pragma Singleton
 // /proc/net/dev counter deltas between two ticks; netHistory keeps the last
 // historyLength (up + down) samples, oldest first.
 //
-// GPU row source (gpuSource): the NVIDIA dGPU when it is usable, else the AMD iGPU's
-// sysfs file, else "none". The cards are found once at start by reading only the
-// `vendor` file of each /sys/class/drm/card<N>/device (0x10de NVIDIA, 0x1002 AMD).
-// NVIDIA is used only if that card's power/runtime_status reads exactly "active"
+// GPU row source (gpuSource): by default the AMD iGPU's sysfs file (the chip that drives
+// the display), else "none". The NVIDIA dGPU is OPT-IN with RICE_NVIDIA=1 in the
+// environment: the session leaves the dGPU runtime-suspended most of the time, and the
+// stream below keeps it awake while the shell runs. The cards are found once at start by
+// reading only the `vendor` file of each /sys/class/drm/card<N>/device (0x10de NVIDIA,
+// 0x1002 AMD). With RICE_NVIDIA=1, NVIDIA is used only if that card's
+// power/runtime_status reads exactly "active"
 // (reading it never wakes the card): then ONE long-lived `nvidia-smi -l 2
 // --query-gpu=...` stream runs (no process per tick) and each line updates gpu and the
 // VRAM values. It runs under `setpriv --pdeathsig TERM` so it dies with the shell
@@ -22,8 +25,6 @@ pragma Singleton
 // back to AMD and is retried after nvBackoff (30, 60, 120, then every 300 s; back to
 // 30 s only after a stream that lasted 300 s), each time only if the card is still
 // active. All timing runs on the shared 2 s timer.
-// RICE_NO_NVIDIA (any non-empty value) skips NVIDIA entirely: the test rig sets it so no
-// test ever runs the real nvidia-smi.
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -58,7 +59,7 @@ Singleton {
     property string nvSmiCommand: "nvidia-smi"
     property int nvStartTimeout: 6000
     property list<int> nvBackoff: [30000, 60000, 120000, 300000]
-    readonly property bool nvAllowed: (Quickshell.env("RICE_NO_NVIDIA") ?? "") === ""
+    readonly property bool nvAllowed: Quickshell.env("RICE_NVIDIA") === "1"
 
     property var lastCpu: null   // {total, idle} of the previous sample
     property var lastNet: null   // {rx, tx, t} of the previous sample (t in ms)
