@@ -26,6 +26,9 @@
 #   9. wallpaper carousel (through tests/rig/carousel.qml): listing, live palette and
 #      wallpaper preview, Escape writes nothing, Enter applies and persists, rapid input
 #      keeps one derive running, empty/single/broken folders, keyboard focus.
+#  10. Bluetooth and Claude limits widgets (through tests/rig/widgets-test.qml): real
+#      devices counted read-only, fake device models, every claude-limits.json state, live
+#      edits, the real status line writer, the 30 s timer, all five rail sections fit.
 # Every qs this script starts runs on a private session bus (qs-run.sh starts its own
 # when none is given), so the shell's NotificationServer never meets the live mako.
 # Needs no running rig (starts and stops its own). Screenshots land in
@@ -1263,6 +1266,203 @@ kitty_pid=""
 kill -TERM "$holder_pid" 2>/dev/null || true
 wait "$holder_pid" 2>/dev/null || true
 holder_pid=""
+"$R/qs-run.sh" stop >/dev/null
+
+# --- 10. Bluetooth and Claude limits rail widgets (U12) --------------------------------
+# Through tests/rig/widgets-test.qml (bars and the production rail) on a fresh rig and
+# qs-run.sh's own private bus. Bluetooth: the real Bluetooth.devices on the system bus is
+# only counted (read only, never named), then the rail's BluetoothWidget gets fake models
+# (a ListModel and QObjects behind `values`, the shape of Bluetooth.devices). Claude: the
+# widget's cachePath points at fixtures in a temp dir, written atomically like limits.py.
+# A fake MPRIS player on the private bus shows the media section for the fit check.
+"$R/nested-hypr.sh" stop >/dev/null
+"$R/nested-hypr.sh" start "$R/full.lua" >/dev/null
+staged=$("$R/qs-run.sh" start --restage --entry "$R/widgets-test.qml")
+wbus=$("$R/qs-run.sh" status | sed -n 's/.* bus=\([^ ]*\).*/\1/p')
+case "$wbus" in
+    "" | *"path=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/bus"*) echo "REFUSING: widget tests need a private bus, got '$wbus'"; exit 1 ;;
+esac
+sleep 2
+n0=$(logn)
+wj() { "$R/qs-run.sh" ipc call widgets get | spy "$1"; }
+wc10() { "$R/qs-run.sh" ipc call widgets "$@"; sleep 0.3; }
+c10="$tmp/c10"
+mkdir -p "$c10"
+lim="$c10/limits.json"
+put_lim() { printf '%s' "$1" >"$lim.tmp" && mv -f "$lim.tmp" "$lim"; sleep 1; }
+# <state> -> fixture JSON relative to now (see the ClaudeWidget header for the shape)
+fixture() {
+    local n f d
+    n=$(date +%s)
+    f="{\"pct\": 38.4, \"resets_at\": $((n + 8060))}"
+    d="{\"pct\": 19, \"resets_at\": $((n + 3 * 86400))}"
+    case "$1" in
+        full) echo "{\"five_hour\": $f, \"seven_day\": $d, \"updated_at\": $((n - 120))}" ;;
+        five) echo "{\"five_hour\": {\"pct\": 81, \"resets_at\": $((n + 3000))}, \"seven_day\": null, \"updated_at\": $((n - 5))}" ;;
+        stale) echo "{\"five_hour\": {\"pct\": 92, \"resets_at\": $((n + 8060))}, \"seven_day\": $d, \"updated_at\": $((n - 2400))}" ;;
+        expired) echo "{\"five_hour\": {\"pct\": 38.4, \"resets_at\": $((n - 60))}, \"seven_day\": $d, \"updated_at\": $((n - 600))}" ;;
+        clamp) echo "{\"five_hour\": {\"pct\": 130, \"resets_at\": $((n + 8060))}, \"seven_day\": {\"pct\": -5, \"resets_at\": $((n + 3 * 86400))}, \"updated_at\": $((n - 60))}" ;;
+        future) echo "{\"five_hour\": $f, \"seven_day\": $d, \"updated_at\": $((n + 10 * 86400))}" ;;
+        bothnull) echo "{\"five_hour\": null, \"seven_day\": null, \"updated_at\": $((n - 60))}" ;;
+    esac
+}
+A1=$(spy "d['a1']" <"$staged/.config/quickshell/colors.json")
+LINE=$(spy "d['line']" <"$staged/.config/quickshell/colors.json")
+WARN=$(spy "d['warn']" <"$staged/.config/quickshell/colors.json")
+DIM=$(spy "d['dim']" <"$staged/.config/quickshell/colors.json")
+# Claude summary: (noData, stale, note, visible texts below the heading, per-row lit and
+# the set of segment colours as palette token names)
+csum="(c['noData'], c['stale'], c['note'], c['texts'][3:] if c['note'] else c['texts'][2:], [(r['label'], r['expired'], r['lit'] if r['segs'] else None, sorted(set(tok.get(x, x) for x in r['colors'])) if r['segs'] else None) for r in c['rows']])"
+claude_is() { wj "(lambda c, tok: $csum)(d['claude'], {'$A1': 'a1', '$LINE': 'line', '$WARN': 'warn', '$DIM': 'dim'})"; }
+
+# a. Read-only by construction: no device method calls or device property writes.
+if grep -nE '\b(connect|disconnect|pair|forget|cancelPair)\(|\.(trusted|blocked|name|connected|wakeAllowed)\s*=[^=]' \
+    "$staged/.config/quickshell/rail/BluetoothWidget.qml" "$staged/.config/quickshell/rail/ClaudeWidget.qml"; then
+    fail "the new widgets contain a device call or a device property write"
+else
+    pass "BluetoothWidget/ClaudeWidget: no connect/disconnect/pair/forget calls, no trusted/blocked/name/connected writes"
+fi
+
+# b. Real Bluetooth.devices (read only): the section shows exactly when something is connected.
+real=$(wj "(d['realCount'], d['realConnected'], d['bt']['visible'], d['bt']['connected'])")
+read -r rc rcon rvis rn < <(echo "$real" | tr -d '(),')
+echo "  real BlueZ devices: $rc known, $rcon connected; section visible $rvis"
+if [[ "$rcon" == 0 ]]; then
+    [[ "$rvis" == False && "$rn" == 0 && "$(wj "d['sections']")" == "['sys', 'claude']" ]] \
+        && pass "real devices, none connected: BLUETOOTH hidden" || fail "real devices: $real"
+else
+    [[ "$rvis" == True && "$rn" == "$rcon" ]] && pass "real devices: $rcon connected shown (names not printed)" || fail "real devices: $real"
+fi
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-widgets-real-DP-1.png" >/dev/null
+
+# c. Fake ListModel: connected+battery 82%, connected without battery, disconnected.
+wc10 fakeBt three
+bt3="(d['bt']['visible'], d['bt']['note'], [(r['name'], r['meter'], r['lit'], r['invert'], r['texts']) for r in d['bt']['rows']])"
+[[ "$(wj "$bt3")" == "(True, '2 connected', [('Rig Buds Pro', True, 4, True, ['Rig Buds Pro', '82%']), ('Rig Pad', False, 0, True, ['Rig Pad'])])" ]] \
+    && pass "fake model: the 2 connected devices only, 82% with a 4/5 inverted meter, the other name only, '2 connected'" \
+    || fail "fake three: $(wj "$bt3")"
+wc10 setConnected 0 false
+[[ "$(wj "(d['bt']['note'], [r['name'] for r in d['bt']['rows']])")" == "('1 connected', ['Rig Pad'])" ]] \
+    && pass "ListModel row disconnects: '1 connected', Rig Pad only" || fail "ListModel disconnect: $(wj "d['bt']")"
+wc10 setConnected 1 false
+[[ "$(wj "(d['bt']['visible'], d['sections'])")" == "(False, ['sys', 'claude'])" ]] \
+    && pass "last fake device disconnects: BLUETOOTH hidden" || fail "all disconnected: $(wj "d['bt']")"
+wc10 fakeBt objects
+[[ "$(wj "(d['bt']['note'], [r['name'] for r in d['bt']['rows']])")" == "('2 connected', ['Rig Buds Pro', 'Rig Pad'])" ]] || fail "objects: $(wj "d['bt']")"
+wc10 setConnected 0 false
+wc10 setConnected 2 true
+[[ "$(wj "(d['bt']['note'], [(r['name'], r['texts']) for r in d['bt']['rows']])")" == "('2 connected', [('Rig Pad', ['Rig Pad']), ('Rig Speaker', ['Rig Speaker', '50%'])])" ]] \
+    && pass "QObject devices (Bluetooth.devices shape): connect/disconnect notifications update the rows" \
+    || fail "objects change: $(wj "d['bt']")"
+wc10 fakeBt empty
+[[ "$(wj "(d['bt']['visible'], d['bt']['connected'])")" == "(False, 0)" ]] && pass "empty model: BLUETOOTH hidden" || fail "empty: $(wj "d['bt']")"
+
+# d. ClaudeWidget's pure helpers.
+wp10=$("$R/qs-run.sh" ipc call widgets parse)
+wd=$(LC_ALL=C date -d @$((1800000000 + 2 * 86400)) '+resets %a %H:%M')
+[[ "$(echo "$wp10" | spy "(d['full'], d['garbage'], d['empty'], d['array'], d['nul'], d['number'], d['badWindow'], d['clamp'])")" \
+    == "({'five': {'pct': 38.4, 'resets': 1800008040}, 'seven': {'pct': 19, 'resets': 1800400000}, 'updated': 1799999880}, None, None, None, None, None, {'five': None, 'seven': None, 'updated': None}, {'five': {'pct': 100, 'resets': 1}, 'seven': {'pct': 0, 'resets': 1}, 'updated': 1})" ]] \
+    && pass "parse: full, garbage/empty/array/null/number -> null, invalid windows -> null, pct clamped" \
+    || fail "parse: $wp10"
+[[ "$(echo "$wp10" | spy "(d['ages'], d['resets'], d['weekday'])")" \
+    == "(['0s', '12s', '59s', '1m', '5m', '59m', '1h', '1h', '23h', '1d', '3d', '0s'], ['resets in <1m', 'resets in 1m', 'resets in 14m', 'resets in 1h 0m', 'resets in 2h 14m', 'resets in 23h 59m'], '$wd')" ]] \
+    && pass "age texts (12s/5m/2h/3d), reset texts, '$wd' beyond 24 h" || fail "texts: $wp10"
+
+# e. Claude states. Missing file first (the staged HOME has no cache): one 'no data' line.
+[[ "$(wj "(d['claude']['visible'], d['claude']['readable'], d['claude']['texts'])")" == "(True, False, ['//', 'CLAUDE', 'no data'])" ]] \
+    && pass "missing cache file: section visible with 'no data'" || fail "missing: $(wj "d['claude']")"
+wc10 setCache "$lim"
+put_lim "$(fixture full)"
+[[ "$(claude_is | sed 's/resets [A-Z][a-z][a-z] [0-9:]*/WD/')" == "(False, False, '2m ago', ['5H', '38%', 'resets in 2h 14m', '7D', '19%', 'WD'], [('5H', False, 4, ['a1', 'line']), ('7D', False, 2, ['a1', 'line'])])" ]] \
+    && pass "full data: 5H 38% (4 lit) 'resets in 2h 14m', 7D 19% weekday reset, '2m ago'" || fail "full: $(claude_is)"
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-widgets-claude-DP-1.png" >/dev/null
+put_lim "$(fixture five)"
+[[ "$(claude_is | sed 's/[56]s ago/Ns ago/')" == "(False, False, 'Ns ago', ['5H', '81%', 'resets in 49m'], [('5H', False, 8, ['line', 'warn'])])" ]] \
+    && pass "five_hour only: one row, 81% in warn colour" || fail "five only: $(claude_is)"
+put_lim "$(fixture stale)"
+[[ "$(claude_is | sed 's/resets [A-Z][a-z][a-z] [0-9:]*/WD/')" == "(False, True, '40m ago', ['5H', '92%', 'resets in 2h 14m', '7D', '19%', 'WD'], [('5H', False, 9, ['dim', 'line']), ('7D', False, 2, ['dim', 'line'])])" ]] \
+    && pass "40 min old: bars dimmed (92% shows dim, not warn), '40m ago'" || fail "stale: $(claude_is)"
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-widgets-claude-stale-DP-1.png" >/dev/null
+put_lim "$(fixture expired)"
+[[ "$(claude_is | sed 's/resets [A-Z][a-z][a-z] [0-9:]*/WD/')" == "(False, False, '10m ago', ['5H', 'no data', '7D', '19%', 'WD'], [('5H', True, None, None), ('7D', False, 2, ['a1', 'line'])])" ]] \
+    && pass "expired 5H window: 'no data' in its row, 7D still shown" || fail "expired: $(claude_is)"
+put_lim '{garbage'
+[[ "$(wj "(d['claude']['texts'], d['claude']['readable'])")" == "(['//', 'CLAUDE', 'no data'], True)" ]] \
+    && pass "'{garbage': 'no data', shell up" || fail "garbage: $(wj "d['claude']")"
+put_lim ''
+[[ "$(wj "d['claude']['texts']")" == "['//', 'CLAUDE', 'no data']" ]] && pass "empty file: 'no data'" || fail "empty file: $(wj "d['claude']")"
+put_lim '[1, 2]'
+[[ "$(wj "d['claude']['texts']")" == "['//', 'CLAUDE', 'no data']" ]] && pass "not an object: 'no data'" || fail "array: $(wj "d['claude']")"
+put_lim "$(fixture bothnull)"
+[[ "$(wj "d['claude']['texts']")" == "['//', 'CLAUDE', 'no data']" ]] && pass "both windows null: 'no data'" || fail "both null: $(wj "d['claude']")"
+put_lim "$(fixture clamp)"
+[[ "$(claude_is | sed 's/resets [A-Z][a-z][a-z] [0-9:]*/WD/')" == "(False, False, '1m ago', ['5H', '100%', 'resets in 2h 14m', '7D', '0%', 'WD'], [('5H', False, 10, ['warn']), ('7D', False, 0, ['line'])])" ]] \
+    && pass "pct 130 and -5 clamped to 100% (10 lit) and 0% (none lit)" || fail "clamp: $(claude_is)"
+put_lim "$(fixture future)"
+[[ "$(wj "(d['claude']['future'], d['claude']['stale'], d['claude']['note'], [r['colors'][0] for r in d['claude']['rows']])")" == "(True, True, 'future', ['$DIM', '$DIM'])" ]] \
+    && pass "updated_at 10 days ahead: note 'future', bars dimmed" || fail "future: $(wj "d['claude']")"
+rm -f "$lim"
+sleep 1
+[[ "$(wj "(d['claude']['texts'], d['claude']['readable'])")" == "(['//', 'CLAUDE', 'no data'], False)" ]] \
+    && pass "cache deleted while running: 'no data'" || fail "deleted: $(wj "d['claude']")"
+put_lim "$(fixture full)"
+[[ "$(wj "(d['claude']['readable'], d['claude']['note'])")" == "(True, '2m ago')" ]] && pass "cache re-created: shown again" \
+    || fail "re-created: $(wj "d['claude']")"
+
+# f. Live edit (in place, not atomic) updates the widget without a restart.
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-widgets-edit-before-DP-1.png" >/dev/null
+n=$(date +%s)
+printf '{"five_hour": {"pct": 62, "resets_at": %s}, "seven_day": {"pct": 44, "resets_at": %s}, "updated_at": %s}\n' \
+    $((n + 3660)) $((n + 2 * 86400)) "$n" >"$lim"
+sleep 1
+[[ "$(wj "[r['texts'][1] for r in d['claude']['rows']]")" == "['62%', '44%']" ]] && pass "in-place edit while running: 62% / 44% without a restart" \
+    || fail "edit: $(wj "d['claude']")"
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-widgets-edit-after-DP-1.png" >/dev/null
+
+# g. The real writer: claude-limits-statusline feeds the widget through the atomic rename.
+n=$(date +%s)
+line=$(printf '{"rate_limits":{"five_hour":{"used_percentage":12.6,"resets_at":%s},"seven_day":{"used_percentage":77,"resets_at":%s}}}' \
+    $((n + 7260)) $((n + 400000)) | CLAUDE_LIMITS_CACHE="$lim" "$staged/.local/bin/claude-limits-statusline")
+sleep 1
+[[ "$line" == "5h 13% · 7d 77%" && "$(wj "([r['texts'][1] for r in d['claude']['rows']], d['claude']['note'])")" == "(['13%', '77%'], '0s ago')" ]] \
+    && pass "claude-limits-statusline output '$line' shows as 13% / 77%" || fail "statusline: '$line' $(wj "d['claude']")"
+
+# h. A path that did not exist when the FileView was set up: the 30 s timer picks it up.
+wc10 setCache "$tmp/c10-later/limits.json"
+[[ "$(wj "d['claude']['readable']")" == False ]] || fail "later: readable before creation"
+mkdir -p "$tmp/c10-later"
+fixture five >"$tmp/c10-later/limits.json"
+t0=$(date +%s)
+for _ in $(seq 34); do [[ "$(wj "d['claude']['readable']")" == True ]] && break; sleep 1; done
+dt=$(($(date +%s) - t0))
+[[ "$(wj "d['claude']['readable']")" == True && $dt -le 32 ]] && pass "file created after start picked up in $dt s (<= 32 s: the watch or the 30 s re-read)" \
+    || fail "later file not picked up within 32 s"
+
+# i. One 30 s timer, only while the section is visible.
+[[ "$(wj "d['timer']")" == "{'running': True, 'interval': 30000}" ]] || fail "timer visible: $(wj "d['timer']")"
+wc10 setClaudeVisible false
+[[ "$(wj "d['timer']")" == "{'running': False, 'interval': 30000}" ]] && pass "Claude timer: 30 s, running while visible, stopped while hidden" \
+    || fail "timer hidden: $(wj "d['timer']")"
+wc10 setClaudeVisible true
+
+# j. All five sections at 1080p: nothing clipped.
+DBUS_SESSION_BUS_ADDRESS="$wbus" python3 -I "$R/fake-mpris.py" "Rig Song" "Rig Artist" 252 >"$tmp/fake10.out" 2>&1 &
+fake_pid=$!
+wc10 setCache "$lim"
+put_lim "$(fixture full)"
+wc10 fakeBt three
+sleep 1
+fit=$(wj "(d['sections'], d['fit']['columnHeight'], d['fit']['claudeBottom'], d['fit']['clipHeight'])")
+read -r fcol fbot fclip < <(wj "d['fit']['columnHeight'], d['fit']['claudeBottom'], d['fit']['clipHeight']" | tr -d '(),')
+[[ "$(wj "d['sections']")" == "['sys', 'media', 'bluetooth', 'claude']" ]] && python3 -I -c "import sys; c, b, h = map(float, sys.argv[1:]); sys.exit(not (b <= h and c <= h and b > 250))" "$fcol" "$fbot" "$fclip" \
+    && pass "all five sections fit the 1080p rail: column $fcol px, CLAUDE ends at $fbot of $fclip px" || fail "fit: $fit"
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-widgets-all-DP-1.png" >/dev/null
+kill -TERM "$fake_pid" 2>/dev/null || true
+wait "$fake_pid" 2>/dev/null || true
+fake_pid=""
+
+bad=$(warns_since "$n0")
+[[ -z "$bad" ]] && pass "qs log: no ERROR/WARN in section 10" || { fail "qs log section 10"; echo "$bad"; }
 "$R/qs-run.sh" stop >/dev/null
 
 "$R/nested-hypr.sh" stop >/dev/null
