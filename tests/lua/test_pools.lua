@@ -27,4 +27,28 @@ assert(pools.step(5, 1) == 5, "step clamps high")
 assert(pools.step(1, -1) == 1, "step clamps low")
 assert(pools.step(3, 1) == 4, "step up")
 assert(pools.step(3, -1) == 2, "step down")
+
+-- pools_present: sorted, de-duplicated pool numbers of the pool-slot ids in the list;
+-- ids outside a slot range (6, 10, 16) and special workspaces (negative) are ignored.
+local function same(a, b)
+  if #a ~= #b then return false end
+  for i = 1, #a do if a[i] ~= b[i] then return false end end
+  return true
+end
+assert(same(pools.pools_present({ 13, 11, 3, 1, 12 }), { 0, 1 }), "pools_present sorts and dedups")
+assert(same(pools.pools_present({ 22, 15 }), { 1, 2 }), "pools_present extra pool")
+assert(same(pools.pools_present({ 6, 10, 16, -98 }), {}), "pools_present ignores non-slot ids")
+assert(same(pools.pools_present({}), {}), "pools_present empty")
+
+-- hop: next/previous present pool, wrapping; the current pool when it is the only one.
+assert(pools.hop(1, { 0, 1 }, 1) == 0, "hop +1 wraps 1 -> 0")
+assert(pools.hop(1, { 0, 1 }, -1) == 0, "hop -1 1 -> 0")
+assert(pools.hop(0, { 0, 1 }, 1) == 1, "hop +1 0 -> 1")
+assert(pools.hop(0, { 0, 1, 2 }, -1) == 2, "hop -1 wraps 0 -> 2")
+assert(pools.hop(1, { 0, 1, 2 }, 1) == 2, "hop +1 1 -> 2")
+assert(pools.hop(2, { 0, 1, 2 }, 1) == 0, "hop +1 wraps 2 -> 0")
+assert(pools.hop(1, { 1 }, 1) == 1, "hop with one pool is a no-op")
+assert(pools.hop(1, {}, -1) == 1, "hop with no pools is a no-op")
+assert(pools.hop(1, { 0, 2 }, 1) == 2, "hop from an absent pool goes to the next present one")
+assert(pools.hop(1, { 0, 2 }, -1) == 0, "hop -1 from an absent pool")
 print("ok")

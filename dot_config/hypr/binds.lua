@@ -40,12 +40,34 @@ function M.step(delta)
     hl.dispatch(hl.dsp.focus({ workspace = pools.ws_id(pool, pools.step(slot, delta)) }))
 end
 
+-- Same slot in the next/previous pool that has a workspace on the focused screen.
+-- When a screen goes away (BenQ unplugged, lid closed) its pool moves onto the other
+-- one; Ctrl+N and the step keys only reach the screen's own pool, this reaches the
+-- moved one. No-op while the screen holds only one pool.
+function M.hop_pool(delta)
+    local mon, own = active_pool()
+    if not mon or not mon.active_workspace then return end
+    local ids = {}
+    for _, w in ipairs(hl.get_workspaces() or {}) do
+        if w.monitor and w.monitor.name == mon.name then ids[#ids + 1] = w.id end
+    end
+    local id = mon.active_workspace.id
+    -- From the active workspace's pool (a moved one too); a non-slot id hops from slot 1.
+    local cur = pools.pools_present({ id })[1] or own
+    local slot = pools.slot_of(id, cur)
+    local target = pools.hop(cur, pools.pools_present(ids), delta)
+    if target == cur then return end
+    hl.dispatch(hl.dsp.focus({ workspace = pools.ws_id(target, slot) }))
+end
+
 for n = 1, 5 do
     hl.bind("CTRL + " .. n, function() M.focus_slot(n) end, { description = "focus slot " .. n .. " on this screen" })
     hl.bind("CTRL + SHIFT + " .. n, function() M.move_to_slot(n) end, { description = "move window to slot " .. n })
 end
 hl.bind("CTRL + ALT + left", function() M.step(-1) end, { description = "previous slot" })
 hl.bind("CTRL + ALT + right", function() M.step(1) end, { description = "next slot" })
+hl.bind("CTRL + ALT + up", function() M.hop_pool(1) end, { description = "same slot, next pool on this screen" })
+hl.bind("CTRL + ALT + down", function() M.hop_pool(-1) end, { description = "same slot, previous pool on this screen" })
 hl.bind("mouse:275", function() M.step(-1) end, { description = "previous slot (mouse back)" })
 hl.bind("mouse:276", function() M.step(1) end, { description = "next slot (mouse forward)" })
 

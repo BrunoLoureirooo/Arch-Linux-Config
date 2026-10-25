@@ -32,4 +32,35 @@ function M.step(slot, delta)
   return math.max(1, math.min(SLOTS, slot + delta))
 end
 
+-- Sorted pool numbers that own at least one of the given workspace ids. Ids that
+-- are not a pool slot (6..10, 16..20, special workspaces < 0) are ignored.
+function M.pools_present(workspace_ids)
+  local seen, out = {}, {}
+  for _, id in ipairs(workspace_ids) do
+    local slot = id % 10
+    local pool = math.floor(id / 10) -- not //: Hyprland and the tests may run LuaJIT
+    if id > 0 and slot >= 1 and slot <= SLOTS and not seen[pool] then
+      seen[pool] = true
+      out[#out + 1] = pool
+    end
+  end
+  table.sort(out)
+  return out
+end
+
+-- The next (delta > 0) or previous (delta < 0) pool in the sorted list `present`,
+-- wrapping around; current_pool itself when no other pool is present.
+function M.hop(current_pool, present, delta)
+  if delta > 0 then
+    for _, p in ipairs(present) do
+      if p > current_pool then return p end
+    end
+    return present[1] or current_pool
+  end
+  for i = #present, 1, -1 do
+    if present[i] < current_pool then return present[i] end
+  end
+  return present[#present] or current_pool
+end
+
 return M

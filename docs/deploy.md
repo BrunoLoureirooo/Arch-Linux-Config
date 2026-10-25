@@ -267,6 +267,16 @@ Do these in order. Anything that fails: note it, and use section 13 if the deskt
    workspace must not change. Unplug the BenQ: its windows move onto the panel, none is lost, and they
    return when it is plugged back in. The lid-closed-with-no-external-screen case is covered only by a
    stub test.
+   **Moved pools.** While a screen is gone its pool lives on the other one: unplugging the BenQ moves 1-5
+   onto the panel, closing the lid moves 11-15 onto the BenQ. `Ctrl+1..5`, `Ctrl+Alt+Left/Right` and the
+   mouse side buttons only ever reach the focused screen's OWN pool, so the moved windows are out of their
+   reach. `Ctrl+Alt+Up` / `Ctrl+Alt+Down` jump to the same slot in the next/previous pool that has a
+   workspace on the focused screen (wrapping; nothing happens when there is only one): on the panel with
+   the BenQ unplugged, `Ctrl+3` then `Ctrl+Alt+Up` lands on workspace 3, where the BenQ's slot-3 windows
+   are. The bar follows the active workspace's pool, so it shows 1-5 while you are there. From a moved
+   workspace, `Ctrl+N` and the step keys go back into the screen's own pool; to reach another slot of the
+   moved pool, pick that slot with `Ctrl+N` and hop again. Check it: unplug the BenQ (or
+   `~/.local/bin/lid close` for the other direction), hop, see the windows, plug back in.
 6. **Bar and rail on both screens.** A bar on the top of each screen showing its own five workspaces
    (active filled, occupied underlined; CPU, MEM, VOL, NET and BAT chips). The rail (clock, sys meters,
    media, bluetooth, claude) only on the BenQ. Wallpaper on both screens (default image
@@ -336,6 +346,7 @@ jump, so workspace stepping is `Ctrl+Alt+Left/Right`). `tests/test_keymap_collis
 | Ctrl + 1..5 | focus slot on this screen's pool |
 | Ctrl + Shift + 1..5 | move window to slot on this screen's pool |
 | Ctrl + Alt + ← → and mouse side buttons | step previous/next slot on this screen |
+| Ctrl + Alt + ↑ ↓ | same slot in the next/previous pool present on this screen (reaches the workspaces a removed screen left here; no-op with one pool) |
 | Super + Alt + ←↑↓→ or h j k l | focus window |
 | Super + Alt + Shift + ←↑↓→ or h j k l | move window (crosses to the other screen at an edge) |
 | Super + the key under Esc (code:49) | focus the other monitor (bound by keycode: on the owner's pt layout that key's keysym is backslash, not grave) |

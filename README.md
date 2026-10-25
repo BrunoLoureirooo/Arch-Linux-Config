@@ -64,6 +64,7 @@ Mac-like scheme: Super is Command, Alt is Option, Control stays Control. All win
 | Ctrl + 1..5 | focus slot on this screen's pool |
 | Ctrl + Shift + 1..5 | move window to slot on this screen's pool |
 | Ctrl + Alt + ← → and mouse side buttons | step previous/next slot on this screen |
+| Ctrl + Alt + ↑ ↓ | same slot in the next/previous pool present on this screen (reaches the workspaces a removed screen left here; no-op with one pool) |
 | Super + Alt + ←↑↓→ or h j k l | focus window |
 | Super + Alt + Shift + ←↑↓→ or h j k l | move window (crosses to the other screen at an edge) |
 | Super + the key under Esc (code:49) | focus the other monitor (bound by keycode: on the owner's pt layout that key's keysym is backslash, not grave) |

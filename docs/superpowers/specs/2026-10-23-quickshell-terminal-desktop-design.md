@@ -15,6 +15,8 @@
 > - **NET chip:** the default-route interface name read from `/proc/net/route`, not NetworkManager/nmcli
 >   (NetworkManager is not running on this machine). BAT shows on every screen that has a battery.
 > - **Workspace 11** is also a default workspace on the laptop panel (so it starts in its own pool).
+> - **Pool hop `Ctrl+Alt+Up/Down`** (added, in section 6): same slot in the next/previous pool present on the
+>   focused screen, so the windows of a pool moved by an unplug or a lid close stay reachable.
 > - **Files:** `Chip.qml`/`Meter.qml` live in `components/` with `Chamfer.qml` (not in `bar/`), `services/Screens.qml`
 >   was added, `WallpaperState.qml` holds the wallpaper choice (with `preview`/`clearPreview` for the carousel),
 >   the rail widgets are in `rail/`. `Chamfer` is two closed filled polygons (Qt 6.11 `ShapePath` has no stroke gradient).
@@ -231,6 +233,7 @@ All window-manager binds use `Super`, `Ctrl+Alt` or `Ctrl` with a digit; none of
 | Ctrl + 1..5 | focus slot on this screen's pool |
 | Ctrl + Shift + 1..5 | move window to slot on this screen's pool |
 | Ctrl + Alt + ← → and mouse side buttons | step previous/next slot on this screen |
+| Ctrl + Alt + ↑ ↓ | same slot in the next/previous pool present on this screen (reaches the workspaces a removed screen left here; no-op with one pool) |
 | Super + Alt + ←↑↓→ or h j k l | focus window |
 | Super + Alt + Shift + ←↑↓→ or h j k l | move window (crosses to the other screen at an edge) |
 | Super + the key under Esc (code:49) | focus the other monitor (bound by keycode: on the owner's pt layout that key's keysym is backslash, not grave) |
