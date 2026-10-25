@@ -150,12 +150,30 @@ done
 ls ~/.config/hypr/*.bak.* ~/.config/waybar/*.bak.* 2>/dev/null
 ```
 
-(Whichever way you choose, `hyprland.conf`, `hyprpaper.conf`, the waybar and wofi files, and anything
-`chezmoi status` marks as modified must be covered: section 13 restores from these backups. Delete
-the `*.bak.*` files you no longer need later; chezmoi ignores them.)
+(Whichever way you choose, `hyprland.conf`, `hyprpaper.conf`, the waybar and wofi files, the two
+scripts below, and anything `chezmoi status` marks as modified must be covered: section 13 restores
+from these backups. Delete the `*.bak.*` files you no longer need later; chezmoi ignores them.)
+
+**`~/.local/bin/lid` and `~/.local/bin/headless` are overwritten.** They are now in the repo
+(`dot_local/bin/executable_lid`, `executable_headless`), ported to the Lua config, so `chezmoi apply`
+replaces your current copies (the `chezmoi managed` loop above backs them up). Your copies call
+`hyprctl keyword monitor` and `hyprctl dispatch dpms`, which Hyprland 0.56 refuses under the Lua config
+(`keyword can't work with non-legacy parsers. Use eval.`), so with the old scripts a lid close would not
+drop the panel and the headless key would cut the mouse and keyboard but leave the screens lit.
+What changed (`chezmoi diff` shows it):
+
+- both scripts try the Lua form first (`hyprctl eval 'hl.monitor({ output = "eDP-1", disabled = true })'`,
+  `hyprctl dispatch 'hl.dsp.dpms({ action = "off" })'`) and fall back to the old hyprlang form, so they also
+  work after a rollback to `hyprland.conf`; success is the literal `ok` reply (hyprctl exits 0 on a refusal);
+- `headless` now turns the displays off BEFORE cutting the peripherals, and only if that worked
+  (otherwise it prints `dpms off failed; peripherals left powered` and exits 1); on restore it powers the
+  peripherals back BEFORE turning the displays on. Your copy cut the peripherals first;
+- `lid close` exits 1 with a message if neither form disabled the panel. The guards (2 s double-tap guard,
+  "only while another output is live") and the `sudo -n ... || true` calls are unchanged.
 
 Expected: new files (hyprland.lua, binds.lua, autostart.lua, lib/pools.lua, quickshell/*,
-xremap/config.yml, kitty/*, the three `~/.local/bin` tools, `~/.local/share/rice/*.py`) and a changed
+xremap/config.yml, kitty/*, the three new `~/.local/bin` tools, `~/.local/share/rice/*.py`), changed
+`~/.local/bin/lid` and `~/.local/bin/headless` (above), and a changed
 waybar `config.jsonc` (the interim persistent-workspaces edit). The colour files (`colors.lua`,
 `colors.json`, `colors.conf`) are `create_` files: written once if absent, never overwritten
 afterwards, because `rice-palette` owns them. `docs/` and `tests/` are not deployed (`.chezmoiignore`).
@@ -196,7 +214,11 @@ Do these in order. Anything that fails: note it, and use section 13 if the deskt
    backslash, not grave, which is why it is bound by code. If your code differs, change the single
    `code:49` in `binds.lua`. Then press `Super` + that key: focus should jump to the other screen.
 3. **Lid switch.** The lid binds (`switch:on:Lid Switch` and `switch:off:Lid Switch`, running
-   `~/.local/bin/lid close` / `open`) are ported verbatim. Do not close the lid to test it. Use your
+   `~/.local/bin/lid close` / `open`) are ported verbatim; the script itself is now the repo's ported copy
+   (section 4). Quick check without the switch: `~/.local/bin/lid close` with the BenQ connected must drop
+   `eDP-1` (`hyprctl monitors` lists only the BenQ, the panel's workspaces 11-15 move to it), and
+   `~/.local/bin/lid open` brings it back (it runs `hyprctl reload`, which re-applies the `hl.monitor` line
+   from `hyprland.lua`; that reload is the only thing that re-enables the panel). Do not close the lid to test it. Use your
    existing fake-switch method (your note "simulating input events with uinput"): a virtual device named
    exactly `Lid Switch`, firing `SW_TABLET_MODE`, which logind ignores. First confirm logind really
    ignores the lid, from the live value and not the config file:
@@ -227,6 +249,14 @@ Do these in order. Anything that fails: note it, and use section 13 if the deskt
    ev(1); time.sleep(3); ev(0); time.sleep(1)
    fcntl.ioctl(fd, 0x5502)                            # UI_DEV_DESTROY
    ```
+
+   **Headless key.** Before you press it, know the recovery: if the mouse and keyboard stay dead, run
+   `sudo /usr/local/bin/headless-peripherals on` from the laptop's internal keyboard (in a terminal, or from
+   a TTY with `Ctrl+Alt+F3`). Press `XF86Launch2`: all screens go dark (`hyprctl monitors -j` shows
+   `"dpmsStatus": false` everywhere, check over SSH or after restoring) and then the G502 and the Semico
+   keyboard lose power. Wait more than 2 s (double-tap guard), press it again: the peripherals come back
+   first, then the screens. If the screens did not go dark, the script printed `dpms off failed;
+   peripherals left powered` and did not cut anything (run `~/.local/bin/headless` in a terminal to see it).
 4. **BenQ matching.** `hyprctl monitors`: the BenQ must show description `BNQ BenQ EX2510S K8M02386019`
    (it is matched by description, not by the port name) at `0x0`, and `eDP-1` at `1920x0`. This was not
    testable in the rig (headless outputs have no description). If the BenQ is not matched, the pool
@@ -318,8 +348,8 @@ jump, so workspace stepping is `Ctrl+Alt+Left/Right`). `tests/test_keymap_collis
 | Ctrl + Alt + W | carousel |
 | Ctrl + Alt + Shift + Q | exit Hyprland (was Super+M) |
 | Print | region screenshot (unchanged) |
-| XF86Launch2 | headless toggle (unchanged) |
-| lid switch on/off | lid script (unchanged) |
+| XF86Launch2 | headless toggle (`~/.local/bin/headless`, now in the repo, ported to the Lua config) |
+| lid switch on/off | `~/.local/bin/lid close` / `open` (now in the repo, ported to the Lua config) |
 
 In kitty nothing is remapped: Super combinations go to kitty's own maps (`super+c` copy, `super+v`
 paste, `super+t` new tab, `super+w` close tab, `super+n` new OS window) and Ctrl combinations stay raw,
@@ -497,6 +527,11 @@ trade-off, not planned to change. The controller revises this block after the fi
 - **xremap runs without `--watch`, and fails silently without permissions.** Section 3. **[accepted/known]**
 - **Carousel first open retains about +60 MB RSS** in the rig, then plateaus (no leak seen); worth
   checking on your machine. **[accepted/known]**
+- **`lid close` under the hyprlang rollback config may silently do nothing. [accepted/known]** In one rig
+  session on a minimal hyprlang config, after an interrupted test left the panel disabled and a reload
+  re-enabled it, `hyprctl keyword monitor "eDP-1, disable"` kept answering `ok` without disabling the output
+  (the same command your pre-port script used). Fresh instances passed every time (3 runs in a row). It only
+  matters after a rollback; `hyprctl monitors` tells you whether the panel really went away.
 <!-- KNOWN-ISSUES:END -->
 
 ## 13. Rollback
@@ -604,7 +639,7 @@ Nothing below was observed on your machine. "Rig" means the headless nested Hypr
 **Input and compositor**
 - The physical mouse side buttons (275/276 are only registered; the step logic is tested through `hyprctl eval`).
 - The key under Esc being `code:49` on your keyboard with Super (the rig sends keycode 49 through a virtual keyboard).
-- Lid switch firing (registered only; the lid scripts were never executed); XF86Launch2 and the exec binds (launchers, `qs ipc`, exit, Print) were registered and read back but not fired.
+- Lid switch firing and the XF86Launch2 key (registered only); the exec binds (launchers, `qs ipc`, exit, Print) were registered and read back but not fired. The `lid` and `headless` scripts themselves WERE run against the rig, under the Lua config and a minimal hyprlang config (`tests/hypr/lid_headless.sh`; `headless` with a fake `sudo`, so the real `headless-peripherals` never ran): eDP-1 disabled and restored, dpms off/on on every output. Not verified: real USB power cuts, real displays going dark, the rollback `hyprland.conf` itself (a stand-in config was used; in one rig session the hyprlang `keyword monitor` answered `ok` without disabling the output, see section 12).
 - BenQ matching by `desc:` (headless outputs have no description): pool 0, the workspace 1-5 rules, the ws 1 default, the `desc:BNQ ...` monitor line at 144 Hz, and `Screens.isMain`; whether `eDP-1` accepts 1920x1080@144.
 - A real monitor unplug migrating workspaces; BAT on the undocked laptop; the nil-monitor path (lid closed with no external screen) inside a real Hyprland.
 - `tests/tools/uinput_keys.py press()` was never run (it would reach the live session).

@@ -20,6 +20,9 @@
 >   the rail widgets are in `rail/`. `Chamfer` is two closed filled polygons (Qt 6.11 `ShapePath` has no stroke gradient).
 > - **Rail** ignores exclusive zones; a 1 px invisible overlay surface reserves its width (direct-scanout trade-off).
 > - **`qs-supervise`** restarts qs 1 s after it exits (spec: within 2 s); xremap starts without `--watch`.
+> - **`lid` and `headless` scripts** are now in the repo (`dot_local/bin/executable_lid`, `executable_headless`) and
+>   ported to the Lua IPC (`hyprctl eval 'hl.monitor(...)'`, `hyprctl dispatch 'hl.dsp.dpms(...)'`) with the hyprlang
+>   form as a fallback; `headless` now darkens the displays before cutting the peripherals (section 10).
 > - **`.chezmoiignore`** also lists `**/__pycache__` and `*.pyc`; the repo has a `.gitignore`.
 > - **Palette:** a grey or black wallpaper still gets a chromatic palette from matugen (the cyan/magenta
 >   fallback is not reached end to end); `rice-palette` writes its four files all-or-nothing with rollback.
@@ -240,8 +243,8 @@ All window-manager binds use `Super`, `Ctrl+Alt` or `Ctrl` with a digit; none of
 | Ctrl + Alt + W | carousel |
 | Ctrl + Alt + Shift + Q | exit Hyprland (was Super+M) |
 | Print | region screenshot (unchanged) |
-| XF86Launch2 | headless toggle (unchanged) |
-| lid switch on/off | lid script (unchanged) |
+| XF86Launch2 | headless toggle (`~/.local/bin/headless`, now in the repo, ported to the Lua config) |
+| lid switch on/off | `~/.local/bin/lid close` / `open` (now in the repo, ported to the Lua config) |
 
 The render page's keymap table, workspace card and Stack text are updated to this table and to decisions 1 to 5 above.
 
@@ -285,6 +288,7 @@ Implementation: an overlay `PanelWindow` (layer Overlay, click-through) holding 
 - The glitch spike may fail (section 8).
 - The idle-memory budget may be missed. Fallback: keep waybar and mako, use Quickshell only for the carousel and launcher.
 - `~/.local/bin/lid open` runs `hyprctl reload`, which now reloads the Lua config. The lid script comments mention `hyprland.conf`; behaviour is unchanged.
+  **Superseded:** behaviour was NOT unchanged: Hyprland 0.56 under the Lua config refuses `hyprctl keyword` and the hyprlang `hyprctl dispatch dpms`, so `lid close` and the headless key broke. Both scripts were moved into the repo (`dot_local/bin/executable_lid`, `executable_headless`) and ported: Lua form first, hyprlang fallback (for the rollback); `headless` darkens the displays before cutting the peripherals and never cuts them if that failed.
 
 ## 11. Open questions for the owner
 

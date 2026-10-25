@@ -15,6 +15,7 @@ Personal Arch Linux dotfiles managed with [chezmoi](https://www.chezmoi.io/).
 | `~/.local/bin/rice-palette`, `~/.local/share/rice/` | Palette tool: derives the neon palette from a wallpaper with matugen and writes the shell, kitty, Hyprland and btop colours |
 | `~/.local/bin/claude-limits-statusline` | Claude Code status line command that caches the 5 h / 7 d usage limits for the rail ([setup](docs/claude-statusline.md)) |
 | `~/.local/bin/qs-supervise` | Restarts Quickshell if it exits |
+| `~/.local/bin/lid`, `~/.local/bin/headless` | Lid switch (drop/restore the laptop panel) and the headless hotkey (displays dark, then mouse/keyboard power cut via `headless-peripherals`); work under the Lua config and the hyprlang rollback |
 | `~/.config/waybar/` | Waybar status bar config and stylesheet (retired by the Quickshell shell, kept for rollback) |
 | `~/.config/wofi/` | Wofi launcher config and stylesheet (retired by the Quickshell launcher, kept for rollback) |
 | `~/.config/nvim/` | Neovim config via [LazyVim](https://lazyvim.org/) |
@@ -75,7 +76,7 @@ Mac-like scheme: Super is Command, Alt is Option, Control stays Control. All win
 | Ctrl + Alt + W | carousel |
 | Ctrl + Alt + Shift + Q | exit Hyprland (was Super+M) |
 | Print | region screenshot (unchanged) |
-| XF86Launch2 | headless toggle (unchanged) |
-| lid switch on/off | lid script (unchanged) |
+| XF86Launch2 | headless toggle (`~/.local/bin/headless`, now in the repo, ported to the Lua config) |
+| lid switch on/off | `~/.local/bin/lid close` / `open` (now in the repo, ported to the Lua config) |
 
 Workspaces are two pools of five, one per screen: 1-5 on the BenQ, 11-15 on the laptop panel.

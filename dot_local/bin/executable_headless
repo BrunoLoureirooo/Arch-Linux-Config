@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Toggle headless mode: all displays dark + mouse/keyboard LEDs off, or restore.
+# Bound to the HP hotkey (XF86Launch2) in hyprland.lua (and in the hyprland.conf
+# rollback copy).
+#
+# State is read back from Hyprland rather than tracked in a file, so this can
+# never get out of sync with what the displays are actually doing.
+#
+# Works under both config formats: the Lua config (Hyprland 0.56 takes Lua
+# dispatchers, `hyprctl dispatch 'hl.dsp.dpms(...)'`) and the legacy hyprlang
+# hyprland.conf the rollback restores (`hyprctl dispatch dpms off|on`). hyprctl
+# answers a refused request with an error instead of "ok".
+#
+# Order: the displays go dark BEFORE the peripherals lose power, and only if that
+# worked; on restore the peripherals come back first. So a failed dpms call can
+# never leave the mouse and keyboard cut while the toggle still reads "lit".
+# Manual recovery from the internal keyboard: sudo /usr/local/bin/headless-peripherals on
+set -u
+
+# Ignore a second press within 2s. dpms and USB power do not settle instantly,
+# so a fast double tap could act on a half-applied state.
+GUARD=${XDG_RUNTIME_DIR:-/tmp}/headless.guard
+if [ -e "$GUARD" ] && [ $(( $(date +%s) - $(stat -c %Y "$GUARD") )) -lt 2 ]; then
+    exit 0
+fi
+touch "$GUARD"
+
+hypr_ok() { [ "$(hyprctl "$@" 2>&1)" = ok ]; }
+dpms() { hypr_ok dispatch "hl.dsp.dpms({ action = \"$1\" })" || hypr_ok dispatch dpms "$1"; }
+
+if hyprctl monitors -j | grep -q '"dpmsStatus": true'; then
+    # Something is still lit -> go headless.
+    if ! dpms off; then
+        echo "${0##*/}: dpms off failed; peripherals left powered" >&2
+        exit 1
+    fi
+    sudo -n /usr/local/bin/headless-peripherals off || true
+else
+    # Peripherals first, so the mouse and keyboard are back even if dpms fails.
+    sudo -n /usr/local/bin/headless-peripherals on || true
+    dpms on || { echo "${0##*/}: dpms on failed" >&2; exit 1; }
+fi
