@@ -53,7 +53,9 @@ Singleton {
     property string routePath: "/proc/net/route"
     property string netDevPath: "/proc/net/dev"
     property string gpuPath: ""  // set by the vendor probe below
-    // NVIDIA: the card's runtime_status (set by the probe unless already set), the
+    property string drmRoot: "/sys/class/drm"   // where the vendor probe looks for cards
+    // NVIDIA: the card's runtime_status (set by the probe, only with the opt-in, unless
+    // already set), the
     // command, the start timeout and the retry back-off (a test config may change them).
     property string nvStatusPath: ""
     property string nvSmiCommand: "nvidia-smi"
@@ -306,21 +308,22 @@ Singleton {
     }
     onGpuPathChanged: if (gpuPath === "" && !nvLive) gpu = -1
 
-    // One-time card lookup: card0 .. card15; the first vendor 0x1002 (AMD) and the
-    // first 0x10de (NVIDIA) win. Only the `vendor` file of each card is read here.
+    // One-time card lookup: card0 .. card15 under drmRoot; the first vendor 0x1002 (AMD)
+    // and the first 0x10de (NVIDIA) win. Only the `vendor` file of each card is read here;
+    // the NVIDIA card's runtime_status path is kept only with the opt-in (RICE_NVIDIA=1).
     property int probeCard: 0
     readonly property int probeLimit: 16
     property string probeAmd: ""
     property string probeNv: ""
     FileView {
         id: vendorProbe
-        path: root.probeCard < root.probeLimit ? "/sys/class/drm/card" + root.probeCard + "/device/vendor" : ""
+        path: root.probeCard < root.probeLimit ? root.drmRoot + "/card" + root.probeCard + "/device/vendor" : ""
         printErrors: false
         onLoaded: {
             // Path changes are deferred: changing it inside its own handler drops
             // the operation that is finishing (quickshell.io.fileview warning).
             const card = root.probeCard;
-            const dev = "/sys/class/drm/card" + card + "/device/";
+            const dev = root.drmRoot + "/card" + card + "/device/";
             const vendor = text().trim();
             if (vendor === "0x1002" && root.probeAmd === "")
                 root.probeAmd = dev + "gpu_busy_percent";
@@ -338,9 +341,11 @@ Singleton {
             return;
         if (probeAmd !== "" && gpuPath === "")
             gpuPath = probeAmd;
+        if (!nvAllowed)
+            return;   // default: no NVIDIA status path, nothing of the card read
         if (probeNv !== "" && nvStatusPath === "")
             nvStatusPath = probeNv;
-        if (nvAllowed && nvStatusPath !== "")
+        if (nvStatusPath !== "")
             nvCheck();
     }
 
@@ -454,6 +459,9 @@ Singleton {
     FileView {
         id: nvStatusFile
         path: root.nvStatusPath
+        // Keep the default preload: with preload false, reload() never loads in
+        // Quickshell 0.3.1 (seen in the rig: nvState stuck at "checking"). A reload()
+        // while the path's preload is in flight still reports once (selftest 11 h/k).
         printErrors: false
         onLoaded: root.nvStatusRead(text().trim())
         onLoadFailed: root.nvStatusRead("")

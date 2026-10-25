@@ -33,3 +33,12 @@ _rig_lock="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/$HYPRLAND_INSTANCE_SIGNAT
 kill -0 "$NESTED_PID" 2>/dev/null || rig_die "nested Hyprland (pid $NESTED_PID) is not running"
 unset _rig_lock
 export QT_QPA_PLATFORM=wayland
+# The shell's NVIDIA stream is opt-in (RICE_NVIDIA=1, e.g. hl.env in the owner's Hyprland
+# config, inherited by every terminal). A rig qs must never run the real nvidia-smi, so an
+# inherited RICE_NVIDIA is dropped; only the rig's own RIG_NVIDIA is passed on (section 11
+# of selftest-qs.sh sets RIG_NVIDIA=1 with a FAKE nvidia-smi first on PATH).
+if [[ -n "${RIG_NVIDIA+set}" ]]; then
+    export RICE_NVIDIA="$RIG_NVIDIA"
+else
+    unset RICE_NVIDIA
+fi
