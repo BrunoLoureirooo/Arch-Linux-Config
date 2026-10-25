@@ -1,15 +1,29 @@
 pragma Singleton
 // System stats for the bar and rail (spec 5.3). One shared 2 s timer re-reads
 // /proc/stat, /proc/meminfo, /proc/net/route, /proc/net/dev and the AMD GPU's
-// gpu_busy_percent through FileViews; no process is ever spawned. The AMD card is
-// found once at start by probing /sys/class/drm/card<N>/device/vendor for 0x1002;
-// nothing else of any other card is read, so the NVIDIA chip (0x10de) is never woken
-// and nvidia-smi never runs. netConn is the interface of the default route (the render shows `wlan0`):
-// this machine runs iwd + systemd-networkd, not NetworkManager. A file that fails keeps
-// the last good value (gpu: -1) and logs one warning, not one per tick.
+// gpu_busy_percent through FileViews. netConn is the interface of the default route
+// (the render shows `wlan0`): this machine runs iwd + systemd-networkd, not
+// NetworkManager. A file that fails keeps the last good value (gpu: -1) and logs one
+// warning, not one per tick.
 // Throughput (rail sparkline): bytes/s summed over every interface but `lo`, from the
 // /proc/net/dev counter deltas between two ticks; netHistory keeps the last
 // historyLength (up + down) samples, oldest first.
+//
+// GPU row source (gpuSource): the NVIDIA dGPU when it is usable, else the AMD iGPU's
+// sysfs file, else "none". The cards are found once at start by reading only the
+// `vendor` file of each /sys/class/drm/card<N>/device (0x10de NVIDIA, 0x1002 AMD).
+// NVIDIA is used only if that card's power/runtime_status reads exactly "active"
+// (reading it never wakes the card): then ONE long-lived `nvidia-smi -l 2
+// --query-gpu=...` stream runs (no process per tick) and each line updates gpu and the
+// VRAM values. It runs under `setpriv --pdeathsig TERM` so it dies with the shell
+// (Quickshell 0.3.1 leaves running children behind when it exits). Fallback to AMD when
+// the card is not active, nvidia-smi is missing or exits before a valid line, or no
+// valid line comes within nvStartTimeout. A stream that dies after valid lines falls
+// back to AMD and is retried after nvBackoff (30, 60, 120, then every 300 s; back to
+// 30 s only after a stream that lasted 300 s), each time only if the card is still
+// active. All timing runs on the shared 2 s timer.
+// RICE_NO_NVIDIA (any non-empty value) skips NVIDIA entirely: the test rig sets it so no
+// test ever runs the real nvidia-smi.
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -20,7 +34,12 @@ Singleton {
     property real cpu: 0       // 0-100, busy share between the last two samples
     property real memGb: 0     // used = MemTotal - MemAvailable, GiB
     property real memPct: 0    // 0-100
-    property real gpu: -1      // 0-100, -1 when there is no readable AMD sysfs file
+    property real gpu: -1      // 0-100, -1 when no source has a value
+    // "nvidia" (after the stream's first valid line) | "amd" | "none"
+    readonly property string gpuSource: nvLive ? "nvidia" : (gpuPath !== "" ? "amd" : "none")
+    property real vramUsedMb: -1   // NVIDIA only, MiB, -1 when unknown
+    property real vramTotalMb: -1
+    property real vramPct: -1      // 0-100, -1 when unknown
     property string netConn: "" // default-route interface, "" when there is none
     property real netUp: 0     // bytes/s sent, all non-loopback interfaces
     property real netDown: 0   // bytes/s received
@@ -33,6 +52,13 @@ Singleton {
     property string routePath: "/proc/net/route"
     property string netDevPath: "/proc/net/dev"
     property string gpuPath: ""  // set by the vendor probe below
+    // NVIDIA: the card's runtime_status (set by the probe unless already set), the
+    // command, the start timeout and the retry back-off (a test config may change them).
+    property string nvStatusPath: ""
+    property string nvSmiCommand: "nvidia-smi"
+    property int nvStartTimeout: 6000
+    property list<int> nvBackoff: [30000, 60000, 120000, 300000]
+    readonly property bool nvAllowed: (Quickshell.env("RICE_NO_NVIDIA") ?? "") === ""
 
     property var lastCpu: null   // {total, idle} of the previous sample
     property var lastNet: null   // {rx, tx, t} of the previous sample (t in ms)
@@ -86,6 +112,33 @@ Singleton {
     function parseGpu(text) {
         const v = parseInt(String(text).trim(), 10);
         return isNaN(v) ? -1 : Math.max(0, Math.min(100, v));
+    }
+
+    // One nvidia-smi line "util, used, total" (csv, noheader, nounits; MiB) ->
+    // {gpu, used, total, pct}, each -1 when unknown ("[N/A]", "[Not Supported]", ...),
+    // or null when the line has fewer than three fields or no number at all. Extra
+    // columns are ignored; a decimal comma ("1024,5") is accepted when the fields are
+    // separated by ", " as nvidia-smi prints them.
+    function parseNvLine(text) {
+        const line = String(text).trim();
+        let f = line.split(/,\s+/);
+        if (f.length < 3)
+            f = line.split(",");
+        if (f.length < 3)
+            return null;
+        const num = s => {
+            const t = s.trim().replace(",", ".");
+            return /^\d+(\.\d+)?$/.test(t) ? Number(t) : -1;
+        };
+        const gpu = num(f[0]), used = num(f[1]), total = num(f[2]);
+        if (gpu < 0 && used < 0 && total < 0)
+            return null;
+        return {
+            gpu: gpu < 0 ? -1 : Math.min(100, gpu),
+            used: used,
+            total: total,
+            pct: used >= 0 && total > 0 ? Math.min(100, 100 * used / total) : -1
+        };
     }
 
     // /proc/net/route -> interface of the default route: Destination 00000000 with
@@ -167,8 +220,9 @@ Singleton {
             memFile.reload();
             routeFile.reload();
             netDevFile.reload();
-            if (root.gpuPath !== "")
+            if (root.gpuPath !== "" && !root.nvLive)
                 gpuFile.reload();
+            root.nvTick(Date.now());
         }
     }
 
@@ -242,18 +296,21 @@ Singleton {
         id: gpuFile
         path: root.gpuPath
         printErrors: false
-        onLoaded: root.gpu = root.parseGpu(text())
+        onLoaded: if (!root.nvLive) root.gpu = root.parseGpu(text())
         onLoadFailed: error => {
-            root.gpu = -1;
+            if (!root.nvLive)
+                root.gpu = -1;
             root.warnOnce("gpu", "cannot read " + path + " (" + FileViewError.toString(error) + ")");
         }
     }
-    onGpuPathChanged: if (gpuPath === "") gpu = -1
+    onGpuPathChanged: if (gpuPath === "" && !nvLive) gpu = -1
 
-    // One-time AMD card lookup: card0 .. card15, first vendor 0x1002 wins. Only the
-    // `vendor` file of each card is read here.
+    // One-time card lookup: card0 .. card15; the first vendor 0x1002 (AMD) and the
+    // first 0x10de (NVIDIA) win. Only the `vendor` file of each card is read here.
     property int probeCard: 0
     readonly property int probeLimit: 16
+    property string probeAmd: ""
+    property string probeNv: ""
     FileView {
         id: vendorProbe
         path: root.probeCard < root.probeLimit ? "/sys/class/drm/card" + root.probeCard + "/device/vendor" : ""
@@ -262,17 +319,155 @@ Singleton {
             // Path changes are deferred: changing it inside its own handler drops
             // the operation that is finishing (quickshell.io.fileview warning).
             const card = root.probeCard;
-            if (text().trim() === "0x1002")
-                Qt.callLater(() => {
-                    root.gpuPath = "/sys/class/drm/card" + card + "/device/gpu_busy_percent";
-                    root.probeCard = root.probeLimit;
-                });
-            else
-                Qt.callLater(() => root.probeCard = card + 1);
+            const dev = "/sys/class/drm/card" + card + "/device/";
+            const vendor = text().trim();
+            if (vendor === "0x1002" && root.probeAmd === "")
+                root.probeAmd = dev + "gpu_busy_percent";
+            else if (vendor === "0x10de" && root.probeNv === "")
+                root.probeNv = dev + "power/runtime_status";
+            Qt.callLater(() => root.probeCard = card + 1);
         }
         onLoadFailed: {
             const card = root.probeCard;
             Qt.callLater(() => root.probeCard = card + 1);
         }
+    }
+    onProbeCardChanged: {
+        if (probeCard !== probeLimit)
+            return;
+        if (probeAmd !== "" && gpuPath === "")
+            gpuPath = probeAmd;
+        if (probeNv !== "" && nvStatusPath === "")
+            nvStatusPath = probeNv;
+        if (nvAllowed && nvStatusPath !== "")
+            nvCheck();
+    }
+
+    // --- NVIDIA stream -----------------------------------------------------------------
+    // nvState: "off" (not used, or given up), "checking" (reading runtime_status),
+    // "starting" (stream up, no valid line yet), "live", "waiting" (back-off).
+    property string nvState: "off"
+    readonly property bool nvLive: nvState === "live"
+    property bool nvRetrying: false   // the current attempt is a back-off retry
+    property int nvRetries: 0         // back-off step of the next retry
+    property real nvDeadline: 0       // ms: start timeout, or when the retry is due
+    property real nvLiveSince: 0      // ms: first valid line of the current stream
+    property int nvExitCode: -1
+
+    function nvCheck() {
+        nvState = "checking";
+        nvStatusFile.reload();
+    }
+
+    // runtime_status read: start only when it is exactly "active".
+    function nvStatusRead(status) {
+        if (nvState !== "checking")
+            return;
+        if (status === "active") {
+            nvExitCode = -1;
+            nvState = "starting";
+            nvDeadline = Date.now() + nvStartTimeout;
+            nvProc.running = true;
+        } else if (nvRetrying) {
+            nvWait();   // asleep now: never wake it; look again at the next step
+        } else {
+            nvState = "off";
+        }
+    }
+
+    // Schedule the next retry.
+    function nvWait() {
+        nvState = "waiting";
+        nvDeadline = Date.now() + nvBackoff[Math.min(nvRetries, nvBackoff.length - 1)];
+        nvRetries++;
+    }
+
+    // Back to AMD (or none): clear the NVIDIA-only values, re-read the AMD file now.
+    function nvFallback() {
+        vramUsedMb = -1;
+        vramTotalMb = -1;
+        vramPct = -1;
+        gpu = -1;
+        if (gpuPath !== "")
+            gpuFile.reload();
+    }
+
+    function nvLine(data) {
+        if (nvState !== "starting" && nvState !== "live")
+            return;
+        const v = parseNvLine(data);
+        if (!v)
+            return;
+        gpu = v.gpu;
+        vramUsedMb = v.used;
+        vramTotalMb = v.total;
+        vramPct = v.pct;
+        if (nvState === "starting") {
+            nvState = "live";
+            nvRetrying = false;
+            nvLiveSince = Date.now();
+        }
+    }
+
+    // The stream ended: exit, kill, or spawn failure.
+    function nvStopped() {
+        const was = nvState;
+        if (was !== "starting" && was !== "live")
+            return;   // stopped on purpose (start timeout)
+        if (was === "live") {
+            nvFallback();
+            // A stream that ran at least the longest step starts the back-off over;
+            // one that keeps dying soon after starting backs off further each time.
+            if (Date.now() - nvLiveSince >= nvBackoff[nvBackoff.length - 1])
+                nvRetries = 0;
+            warnOnce("nv-died", "nvidia-smi stream ended (exit " + nvExitCode + "); GPU row on AMD, retrying with back-off");
+            nvRetrying = true;
+            nvWait();
+        } else if (nvExitCode === 127) {
+            // setpriv could not find the command: expected without the NVIDIA tools.
+            console.info("Stats: " + nvSmiCommand + " not found; GPU row on AMD");
+            nvState = "off";
+        } else {
+            warnOnce("nv-start", "nvidia-smi exited (" + nvExitCode + ") before a valid line; GPU row on AMD");
+            if (nvRetrying)
+                nvWait();
+            else
+                nvState = "off";
+        }
+    }
+
+    // On every shared tick: the start timeout and a due retry.
+    function nvTick(now) {
+        if (nvState === "starting" && now >= nvDeadline) {
+            warnOnce("nv-timeout", "no valid nvidia-smi line within " + nvStartTimeout + " ms; GPU row on AMD");
+            const retry = nvRetrying;
+            nvState = "off";   // nvStopped ignores the exit this causes
+            nvProc.running = false;
+            if (retry)
+                nvWait();
+        } else if (nvState === "waiting" && now >= nvDeadline) {
+            nvCheck();
+        }
+    }
+
+    FileView {
+        id: nvStatusFile
+        path: root.nvStatusPath
+        printErrors: false
+        onLoaded: root.nvStatusRead(text().trim())
+        onLoadFailed: root.nvStatusRead("")
+    }
+
+    Process {
+        id: nvProc
+        command: ["setpriv", "--pdeathsig", "TERM", "--", root.nvSmiCommand, "-l", "2",
+            "--query-gpu=utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"]
+        stdout: SplitParser {
+            onRead: data => root.nvLine(data)
+        }
+        onExited: code => root.nvExitCode = code
+        // running drops to false on an exit and on a spawn failure (no exited then);
+        // deferred so that exited has recorded the code first.
+        onRunningChanged: if (!running) Qt.callLater(root.nvStopped)
     }
 }
