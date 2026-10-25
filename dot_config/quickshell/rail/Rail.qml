@@ -70,8 +70,8 @@ PanelWindow {
                 ClockWidget { Layout.fillWidth: true; px: rail.px }
                 SysWidget { Layout.fillWidth: true; px: rail.px }
                 MediaWidget { Layout.fillWidth: true; px: rail.px }
-                // More sections (Bluetooth, Claude limits; unit U12) go here, one line each:
-                //   BluetoothWidget { Layout.fillWidth: true; px: rail.px }
+                BluetoothWidget { Layout.fillWidth: true; px: rail.px }
+                ClaudeWidget { Layout.fillWidth: true; px: rail.px }
             }
         }
     }
