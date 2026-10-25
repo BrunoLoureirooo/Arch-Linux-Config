@@ -29,6 +29,9 @@
 #  10. Bluetooth and Claude limits widgets (through tests/rig/widgets-test.qml): real
 #      devices counted read-only, fake device models, every claude-limits.json state, live
 #      edits, the real status line writer, the 30 s timer, all five rail sections fit.
+#  11. NVIDIA GPU source (through tests/rig/nvidia-test.qml, a FAKE nvidia-smi): parser
+#      fixtures, stream values and the VRM row, [N/A], timeout, immediate exit, back-off
+#      restarts, runtime_status not active, missing command, no fake left after qs stops.
 # Every qs this script starts runs on a private session bus (qs-run.sh starts its own
 # when none is given), so the shell's NotificationServer never meets the live mako.
 # Needs no running rig (starts and stops its own). Screenshots land in
@@ -1464,6 +1467,217 @@ fake_pid=""
 bad=$(warns_since "$n0")
 [[ -z "$bad" ]] && pass "qs log: no ERROR/WARN in section 10" || { fail "qs log section 10"; echo "$bad"; }
 "$R/qs-run.sh" stop >/dev/null
+
+# --- 11. NVIDIA GPU source (U15) -------------------------------------------------------
+# Through tests/rig/nvidia-test.qml with a FAKE nvidia-smi (tests/rig/fake-nvidia-smi.sh)
+# first on PATH; the real nvidia-smi never runs here. Every qs below is started with
+# RICE_NO_NVIDIA= (empty, rig_env.sh defaults it to 1) except in scenario j. The fake logs
+# each start (PID, time, args) so starts are counted and every fake PID is checked dead
+# after its qs stops.
+nvbin="$tmp/nvbin"
+mkdir -p "$nvbin"
+cp "$R/fake-nvidia-smi.sh" "$nvbin/nvidia-smi"
+chmod +x "$nvbin/nvidia-smi"
+nvst="$tmp/nv-status"
+nvlog="$tmp/nv-starts.log"
+real_nv_before=$(pgrep -x nvidia-smi || true)
+amd11=""
+nvcard=""
+for v in /sys/class/drm/card*/device/vendor; do
+    case "$(cat "$v" 2>/dev/null)" in
+        0x1002) [[ -n "$amd11" ]] || amd11="${v%/vendor}/gpu_busy_percent" ;;
+        0x10de) [[ -n "$nvcard" ]] || nvcard="${v%/vendor}/power/runtime_status" ;;
+    esac
+done
+want_src_fallback=$([[ -n "$amd11" ]] && echo amd || echo none)
+NVCMD="-l 2 --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits"
+# nv_start [VAR=value ...]: a fresh qs on the test config, NVIDIA allowed, fake first on PATH.
+nvpath="$nvbin:$(printenv PATH)"
+nv_start() {
+    : >"$nvlog"
+    env RICE_NO_NVIDIA= FAKE_NV_LOG="$nvlog" PATH="$nvpath" "$@" \
+        "$R/qs-run.sh" start --entry "$R/nvidia-test.qml" >/dev/null
+}
+nvj() { "$R/qs-run.sh" ipc call nv get | spy "$1"; }
+# nv_wait <seconds> <python expr over d>: poll every 0.5 s until the expression is True.
+nv_wait() {
+    local i
+    for ((i = 0; i < $1 * 2; i++)); do
+        [[ "$(nvj "$2")" == True ]] && return 0
+        sleep 0.5
+    done
+    return 1
+}
+starts() { grep -c '^start ' "$nvlog" || true; }
+# Fake PIDs from the log that still run (the fake's args contain its path .../nvidia-smi).
+alive_fakes() {
+    local p
+    while read -r p; do
+        ps -o args= -p "$p" 2>/dev/null | grep -qF "$nvbin/nvidia-smi" && echo "$p"
+    done < <(awk '/^start /{print $2}' "$nvlog")
+    return 0
+}
+# nv_stop <label>: stop qs, then every fake it started must be gone within 1 s.
+nv_stop() {
+    "$R/qs-run.sh" stop >/dev/null
+    local left i
+    for ((i = 0; i < 10; i++)); do left=$(alive_fakes); [[ -z "$left" ]] && break; sleep 0.1; done
+    [[ -z "$left" ]] && pass "$1: qs stopped, no fake nvidia-smi left ($(starts) start(s) checked by PID)" \
+        || fail "$1: fake nvidia-smi left: $left"
+}
+nv_warns() { "$R/qs-run.sh" log | grep -E 'WARN|ERROR' | grep -v 'host portal' || true; }
+
+# a. Pure parser and VRM text fixtures.
+want='{"normal":{"gpu":17,"used":1024,"total":4096,"pct":25},"spaces":{"gpu":17,"used":1024,"total":4096,"pct":25},'
+want+='"noSpace":{"gpu":17,"used":1024,"total":4096,"pct":25},"na":{"gpu":-1,"used":1024,"total":-1,"pct":-1},'
+want+='"allNa":null,"empty":null,"blank":null,"two":null,"extra":{"gpu":5,"used":2048,"total":4096,"pct":50},'
+want+='"comma":{"gpu":17,"used":1024.5,"total":4096,"pct":25.01220703125},"over":{"gpu":100,"used":5000,"total":4096,"pct":100},'
+want+='"garbage":null,"texts":["1.0/4.0G","1.5/4.0G","0.0/4.0G","--","--","13/16G","4.0/4.0G"]}'
+echo active >"$nvst"
+nv_start NVT_STATUS="$nvst"
+got=$("$R/qs-run.sh" ipc call nv parse)
+[[ "$got" == "$want" ]] && pass "parseNvLine (spaces, [N/A], extra columns, decimal comma, garbage) and VRM texts on fixtures" \
+    || { fail "nvidia fixtures"; echo "  got  $got"; echo "  want $want"; }
+
+# b. Normal stream: the fake's values reach Stats and the rail, one process.
+nv_wait 8 "d['gpuSource'] == 'nvidia'" || fail "normal: gpuSource never became nvidia ($(nvj d))"
+rows="[(r['label'], r['visible'], r['text'], r['lit']) for r in d['rows']]"
+[[ "$(nvj "(d['gpu'], d['vramUsedMb'], d['vramTotalMb'], d['vramPct'], d['nvState'])")" == "(42, 1536, 4096, 37.5, 'live')" ]] \
+    && pass "normal stream: gpuSource nvidia, gpu 42, VRAM 1536/4096 MiB (37.5%) as the fake prints" \
+    || fail "normal values: $(nvj d)"
+[[ "$(nvj "${rows}[2:]")" == "[('GPU', True, '42%', 4), ('VRM', True, '1.5/4.0G', 4)]" ]] \
+    && pass "rail: GPU 42% (4 lit), VRM row '1.5/4.0G' (4 lit)" || fail "normal rows: $(nvj "$rows")"
+[[ "$(nvj "len(set(r['valueWidth'] for r in d['rows'])) == 1 and all(r['valueTextWidth'] <= r['valueWidth'] for r in d['rows'])")" == True ]] \
+    && pass "value column: one width for all four rows ($(nvj "d['rows'][0]['valueWidth']") px), '1.5/4.0G' fits it" \
+    || fail "value widths: $(nvj "[(r['valueWidth'], r['valueTextWidth']) for r in d['rows']]")"
+[[ "$(nvj "d['rows'][3]['bottom'] < d['fit']['clipHeight'] and d['fit']['columnHeight'] <= d['fit']['clipHeight']")" == True ]] \
+    && pass "rail fits 1080p with the VRM row (column $(nvj "d['fit']['columnHeight']") of $(nvj "d['fit']['clipHeight']") px)" \
+    || fail "fit: $(nvj "d['fit']")"
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-nvidia-stream-DP-1.png" >/dev/null
+sleep 4
+[[ "$(starts)" == 1 && "$(sed -n '1s/^start [0-9]* [0-9]* //p' "$nvlog")" == "$NVCMD" ]] \
+    && pass "one long-lived stream (1 start after ~10 s), args '$NVCMD'" || fail "starts: $(cat "$nvlog")"
+[[ -z "$(nv_warns)" ]] && pass "normal stream: no WARN/ERROR" || { fail "normal warns"; nv_warns; }
+nv_stop "normal stream"
+
+# b2. qs killed with SIGKILL (no clean exit at all): the stream still dies (pdeathsig).
+nv_start NVT_STATUS="$nvst"
+nv_wait 8 "d['gpuSource'] == 'nvidia'" || fail "kill: never live"
+qs_pid=$(sed -n 's/^QS_PID=//p' "$TB/qs-run.env")
+fpid=$(awk '/^start /{print $2; exit}' "$nvlog")
+kill -KILL "$qs_pid"
+for _ in $(seq 20); do [[ -z "$(alive_fakes)" ]] && break; sleep 0.1; done
+[[ -n "$fpid" && -z "$(alive_fakes)" ]] && pass "qs SIGKILLed: its fake nvidia-smi ($fpid) died with it" \
+    || fail "SIGKILL: fake left $(alive_fakes)"
+"$R/qs-run.sh" stop >/dev/null   # clears the stale state and the private bus
+
+# c. [N/A] fields: still the NVIDIA source; unknown values stay -1, the rows follow.
+nv_start NVT_STATUS="$nvst" FAKE_NV_LINE="[N/A], 1024, [Not Supported]"
+nv_wait 8 "d['gpuSource'] == 'nvidia'" || fail "N/A: never live"
+[[ "$(nvj "(d['gpu'], d['vramUsedMb'], d['vramTotalMb'], d['vramPct'], ${rows}[2:])")" \
+    == "(-1, 1024, -1, -1, [('GPU', False, '-1%', 0), ('VRM', True, '--', 0)])" ]] \
+    && pass "'[N/A], 1024, [Not Supported]': gpu -1 (GPU row hidden), VRM row '--'" || fail "N/A: $(nvj d)"
+nv_stop "[N/A] fields"
+
+# d. Only invalid lines: no valid line within 6 s -> the fallback source, stream stopped.
+nv_start NVT_STATUS="$nvst" FAKE_NV_LINE="[N/A], [N/A], [N/A]"
+t0=$(date +%s)
+nv_wait 12 "d['nvState'] == 'off'" || fail "timeout: still $(nvj "d['nvState']")"
+dt=$(($(date +%s) - t0))
+fallback_ok="d['gpuSource'] == '$want_src_fallback' and d['vramPct'] == -1 and (d['gpu'] >= 0) == ('$amd11' != '')"
+[[ "$(nvj "$fallback_ok")" == True && $dt -ge 5 && $dt -le 10 && -z "$(alive_fakes)" ]] \
+    && pass "no valid line: $want_src_fallback after ${dt} s (6 s timeout on the 2 s tick), the fake was stopped" \
+    || fail "timeout: ${dt}s $(nvj d) alive: $(alive_fakes)"
+[[ "$(nvj "[(r['label'], r['visible']) for r in d['rows']][2:]")" == "[('GPU', $([[ -n "$amd11" ]] && echo True || echo False)), ('VRM', False)]" ]] \
+    && pass "after the timeout: VRM row hidden, GPU row $([[ -n "$amd11" ]] && echo "from AMD" || echo hidden)" \
+    || fail "timeout rows: $(nvj "$rows")"
+sleep 6
+[[ "$(starts)" == 1 && "$(nv_warns | grep -c .)" == 1 && "$(nv_warns | grep -c 'no valid nvidia-smi line')" == 1 ]] \
+    && pass "timeout: one start, exactly one warning, no retry" || { fail "timeout warns/starts ($(starts))"; nv_warns; }
+nv_stop "timeout"
+
+# e. The fake exits at once (exit 9): the fallback well within the timeout, no spinning.
+nv_start NVT_STATUS="$nvst" FAKE_NV_MODE=exit
+nv_wait 3 "d['nvState'] == 'off'" && [[ "$(nvj "$fallback_ok")" == True ]] \
+    && pass "fake exits 9 at once: $want_src_fallback within 3 s" || fail "exit: $(nvj d)"
+sleep 10
+[[ "$(starts)" == 1 && "$(nv_warns | grep -c .)" == 1 && "$(nv_warns | grep -c 'exited (9) before a valid line')" == 1 ]] \
+    && pass "immediate exit: 1 start in 10 s (no spin), one warning" || { fail "exit starts $(starts)"; nv_warns; }
+nv_stop "immediate exit"
+
+# f. The stream dies mid-way: fallback, then back-off retries (shortened to 4/8/12 s by the
+# test config). Each fake run prints 4 lines 1 s apart, then exits 1. Finally the card
+# "suspends" during a back-off wait: the next retry must not start anything.
+nv_start NVT_STATUS="$nvst" FAKE_NV_MODE=die FAKE_NV_COUNT=4 FAKE_NV_LINE="7, 3500, 4096" NVT_BACKOFF=4000,8000,12000
+nv_wait 8 "d['gpuSource'] == 'nvidia'" || fail "die: never live"
+[[ "$(nvj "(d['gpu'], d['vramPct'] > 85, ${rows}[2:])")" == "(7, True, [('GPU', True, '7%', 1), ('VRM', True, '3.4/4.0G', 9)])" ]] \
+    && pass "another fake line: gpu 7, VRM '3.4/4.0G' (9 lit, above 75 -> warn colour)" || fail "die values: $(nvj d)"
+QS_SETTLE=0.3 "$R/qs-run.sh" shot DP-1 "$SHOTS/qs-nvidia-vram-high-DP-1.png" >/dev/null
+nv_wait 8 "d['nvState'] == 'waiting'" && [[ "$(nvj "$fallback_ok and not d['rows'][3]['visible']")" == True ]] \
+    && pass "stream died: back to $want_src_fallback, VRAM cleared, VRM row hidden, retry scheduled" || fail "die fallback: $(nvj d)"
+for _ in $(seq 40); do [[ "$(starts)" -ge 3 ]] && break; sleep 1; done
+echo suspended >"$nvst"
+read -r g1 g2 < <(awk '/^start /{t[++n]=$3} END{print t[2]-t[1], t[3]-t[2]}' "$nvlog")
+echo "  start gaps: ${g1} ms, ${g2} ms (stream ~4 s + back-off 4 s / 8 s + up to one 2 s tick)"
+[[ "$(starts)" == 3 && $g1 -ge 8000 && $g1 -le 11500 && $g2 -ge 12000 && $g2 -le 15500 ]] \
+    && pass "back-off restarts: 3 starts, gaps ${g1} / ${g2} ms grow with the steps" || fail "back-off: $(cat "$nvlog")"
+sleep 20
+[[ "$(starts)" == 3 && "$(nvj "d['nvState']")" == waiting && "$(nvj "$fallback_ok")" == True ]] \
+    && pass "card not active at the next retry: nothing started in 20 s (still waiting, $want_src_fallback)" \
+    || fail "suspended retry: $(starts) starts, $(nvj d)"
+[[ "$(nv_warns | grep -c 'stream ended')" == 1 && "$(nv_warns | grep -c .)" == 1 ]] \
+    && pass "three stream deaths: exactly one warning" || { fail "die warns"; nv_warns; }
+nv_stop "stream dies"
+
+# f2. A stream that lasted at least the longest step (12 s here) starts the back-off over:
+# every gap is ~14 s of stream + the first step (4 s), never the 8 s step.
+echo active >"$nvst"
+nv_start NVT_STATUS="$nvst" FAKE_NV_MODE=die FAKE_NV_COUNT=14 NVT_BACKOFF=4000,8000,12000
+for _ in $(seq 50); do [[ "$(starts)" -ge 3 ]] && break; sleep 1; done
+read -r g1 g2 < <(awk '/^start /{t[++n]=$3} END{print t[2]-t[1], t[3]-t[2]}' "$nvlog")
+echo "  start gaps: ${g1} ms, ${g2} ms (stream ~14 s + back-off 4 s + up to one 2 s tick)"
+[[ "$(starts)" -ge 3 && $g1 -ge 18000 && $g1 -le 21500 && $g2 -ge 18000 && $g2 -le 21500 ]] \
+    && pass "long-lived streams: back-off restarts at the first step each time (${g1} / ${g2} ms)" \
+    || fail "back-off reset: $(cat "$nvlog")"
+nv_stop "long-lived streams"
+
+# g. runtime_status not active from the start: no process at all.
+echo suspended >"$nvst"
+nv_start NVT_STATUS="$nvst"
+sleep 6
+[[ "$(starts)" == 0 && "$(nvj "d['nvState'] == 'off' and $fallback_ok")" == True && -z "$(nv_warns)" ]] \
+    && pass "runtime_status 'suspended': no nvidia-smi started at all, $want_src_fallback, no warning" \
+    || fail "suspended: $(starts) starts $(nvj d)"
+nv_stop "not active"
+
+# h. The real card's runtime_status (read only): the probe finds it; the fake is started
+# only if the card is active right now (it usually sleeps on this machine).
+nv_start
+sleep 6
+real_status=$([[ -n "$nvcard" ]] && cat "$nvcard" || echo none)
+want_starts=$([[ "$real_status" == active ]] && echo 1 || echo 0)
+[[ "$(nvj "d['nvStatusPath']")" == "$nvcard" && "$(starts)" == "$want_starts" ]] \
+    && pass "real sysfs: probe found ${nvcard:-no NVIDIA card}, status '$real_status' -> $want_starts start(s)" \
+    || fail "real sysfs: $(nvj "d['nvStatusPath']") $(starts) starts (status $real_status)"
+nv_stop "real sysfs"
+
+# i. nvidia-smi missing: the fallback, no warning, one info line.
+echo active >"$nvst"
+nv_start NVT_STATUS="$nvst" NVT_SMI=rig-no-such-nvidia-smi
+nv_wait 4 "d['nvState'] == 'off'" && [[ "$(nvj "$fallback_ok")" == True && "$(starts)" == 0 && -z "$(nv_warns)" \
+    && "$("$R/qs-run.sh" log | grep -c 'rig-no-such-nvidia-smi not found')" == 1 ]] \
+    && pass "nvidia-smi not on PATH: $want_src_fallback, no WARN/ERROR, one info line" || { fail "missing: $(nvj d)"; nv_warns; }
+nv_stop "missing nvidia-smi"
+
+# j. The rig default (RICE_NO_NVIDIA=1 from rig_env.sh): NVIDIA never tried.
+: >"$nvlog"
+env FAKE_NV_LOG="$nvlog" PATH="$nvpath" NVT_STATUS="$nvst" "$R/qs-run.sh" start --entry "$R/nvidia-test.qml" >/dev/null
+sleep 6
+[[ "$(starts)" == 0 && "$(nvj "(d['nvAllowed'], d['nvState'], d['gpuSource'])")" == "(False, 'off', '$want_src_fallback')" ]] \
+    && pass "RICE_NO_NVIDIA=1 (rig default): no start, $want_src_fallback" || fail "rig default: $(starts) $(nvj d)"
+nv_stop "rig default"
+[[ "$(pgrep -x nvidia-smi || true)" == "$real_nv_before" ]] && pass "no real nvidia-smi was started by section 11" \
+    || fail "nvidia-smi processes changed: '$real_nv_before' -> '$(pgrep -x nvidia-smi || true)'"
 
 "$R/nested-hypr.sh" stop >/dev/null
 trap - EXIT
