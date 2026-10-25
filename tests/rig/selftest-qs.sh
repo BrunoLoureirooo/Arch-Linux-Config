@@ -37,6 +37,10 @@
 # Needs no running rig (starts and stops its own). Screenshots land in
 # ~/.cache/rice-testbin/shots/qs-*.png. Exit 0 = all checks passed.
 set -euo pipefail
+# The NVIDIA stream is opt-in (RICE_NVIDIA=1); a terminal of a session that opted in
+# would pass it on to every qs here and run the real nvidia-smi. Only section 11 sets
+# it, with a FAKE nvidia-smi first on PATH.
+unset RICE_NVIDIA
 R="$(dirname "$(realpath "$0")")"
 TB="${RICE_TESTBIN:-$HOME/.cache/rice-testbin}"
 SHOTS="$TB/shots"
@@ -1470,8 +1474,8 @@ bad=$(warns_since "$n0")
 
 # --- 11. NVIDIA GPU source (U15) -------------------------------------------------------
 # Through tests/rig/nvidia-test.qml with a FAKE nvidia-smi (tests/rig/fake-nvidia-smi.sh)
-# first on PATH; the real nvidia-smi never runs here. Every qs below is started with
-# RICE_NO_NVIDIA= (empty, rig_env.sh defaults it to 1) except in scenario j. The fake logs
+# first on PATH; the real nvidia-smi never runs here. Every qs below is started with the
+# opt-in RICE_NVIDIA=1 except in scenario j (the default: no RICE_NVIDIA). The fake logs
 # each start (PID, time, args) so starts are counted and every fake PID is checked dead
 # after its qs stops.
 nvbin="$tmp/nvbin"
@@ -1495,7 +1499,7 @@ NVCMD="-l 2 --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,no
 nvpath="$nvbin:$(printenv PATH)"
 nv_start() {
     : >"$nvlog"
-    env RICE_NO_NVIDIA= FAKE_NV_LOG="$nvlog" PATH="$nvpath" "$@" \
+    env RICE_NVIDIA=1 FAKE_NV_LOG="$nvlog" PATH="$nvpath" "$@" \
         "$R/qs-run.sh" start --entry "$R/nvidia-test.qml" >/dev/null
 }
 nvj() { "$R/qs-run.sh" ipc call nv get | spy "$1"; }
@@ -1669,13 +1673,25 @@ nv_wait 4 "d['nvState'] == 'off'" && [[ "$(nvj "$fallback_ok")" == True && "$(st
     && pass "nvidia-smi not on PATH: $want_src_fallback, no WARN/ERROR, one info line" || { fail "missing: $(nvj d)"; nv_warns; }
 nv_stop "missing nvidia-smi"
 
-# j. The rig default (RICE_NO_NVIDIA=1 from rig_env.sh): NVIDIA never tried.
-: >"$nvlog"
-env FAKE_NV_LOG="$nvlog" PATH="$nvpath" NVT_STATUS="$nvst" "$R/qs-run.sh" start --entry "$R/nvidia-test.qml" >/dev/null
-sleep 6
-[[ "$(starts)" == 0 && "$(nvj "(d['nvAllowed'], d['nvState'], d['gpuSource'])")" == "(False, 'off', '$want_src_fallback')" ]] \
-    && pass "RICE_NO_NVIDIA=1 (rig default): no start, $want_src_fallback" || fail "rig default: $(starts) $(nvj d)"
-nv_stop "rig default"
+# j. The default: NVIDIA is opt-in. Without RICE_NVIDIA (and with RICE_NVIDIA=0) no fake is
+# ever started, although runtime_status says "active" and the fake is first on PATH.
+echo active >"$nvst"
+for optin in unset 0; do
+    : >"$nvlog"
+    if [[ $optin == unset ]]; then
+        env -u RICE_NVIDIA FAKE_NV_LOG="$nvlog" PATH="$nvpath" NVT_STATUS="$nvst" \
+            "$R/qs-run.sh" start --entry "$R/nvidia-test.qml" >/dev/null
+    else
+        env RICE_NVIDIA="$optin" FAKE_NV_LOG="$nvlog" PATH="$nvpath" NVT_STATUS="$nvst" \
+            "$R/qs-run.sh" start --entry "$R/nvidia-test.qml" >/dev/null
+    fi
+    sleep 8
+    [[ "$(starts)" == 0 && "$(nvj "(d['nvAllowed'], d['nvState'], d['gpuSource'], d['rows'][3]['visible'])")" \
+        == "(False, 'off', '$want_src_fallback', False)" ]] \
+        && pass "RICE_NVIDIA $optin (default off): status active + fake on PATH, still no start, $want_src_fallback, no VRM row" \
+        || fail "default off ($optin): $(starts) starts $(nvj d)"
+    nv_stop "default off ($optin)"
+done
 [[ "$(pgrep -x nvidia-smi || true)" == "$real_nv_before" ]] && pass "no real nvidia-smi was started by section 11" \
     || fail "nvidia-smi processes changed: '$real_nv_before' -> '$(pgrep -x nvidia-smi || true)'"
 
