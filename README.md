@@ -14,7 +14,7 @@ Personal Arch Linux dotfiles managed with [chezmoi](https://www.chezmoi.io/).
 | `~/.config/kitty/` | kitty config (JetBrainsMono Nerd Font, Super copy/paste/tab maps, palette colours) |
 | `~/.local/bin/rice-palette`, `~/.local/share/rice/` | Palette tool: derives the neon palette from a wallpaper with matugen and writes the shell, kitty, Hyprland and btop colours |
 | `~/.local/bin/claude-limits-statusline` | Claude Code status line command that caches the 5 h / 7 d usage limits for the rail ([setup](docs/claude-statusline.md)) |
-| `~/.local/bin/qs-supervise` | Restarts Quickshell if it exits |
+| `~/.local/bin/qs-supervise` | Restarts Quickshell if it exits (1 s; backs off up to 30 s if it keeps failing at startup; stops with the compositor) |
 | `~/.local/bin/lid`, `~/.local/bin/headless` | Lid switch (drop/restore the laptop panel) and the headless hotkey (displays dark, then mouse/keyboard power cut via `headless-peripherals`); work under the Lua config and the hyprlang rollback |
 | `~/.config/waybar/` | Waybar status bar config and stylesheet (retired by the Quickshell shell, kept for rollback) |
 | `~/.config/wofi/` | Wofi launcher config and stylesheet (retired by the Quickshell launcher, kept for rollback) |

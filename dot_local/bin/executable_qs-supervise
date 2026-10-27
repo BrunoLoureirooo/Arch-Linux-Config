@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
-# qs-supervise [qs args...]: run Quickshell and restart it 1 s after it exits, for any
+# qs-supervise [qs args...]: run Quickshell and restart it after it exits, for any
 # reason. SIGTERM/SIGINT stop the loop: the running qs gets SIGTERM, the supervisor
 # waits for it and exits. Only ever signals its own child; never kills by name.
 # Production runs it with no arguments (qs finds ~/.config/quickshell/shell.qml).
+#
+# Restart delay: 1 s after a run that lasted 5 s or more. A run shorter than that
+# (qs failing at startup) doubles the delay for the next one, up to 30 s, so a broken
+# config cannot spin a tight loop; a long run resets it to 1 s. When the compositor is
+# gone (HYPRLAND_INSTANCE_SIGNATURE set but its runtime dir removed) the loop exits
+# instead of restarting qs into a dead session.
 set -u
 
 child=""
 stopping=0
+delay=1
 
 on_stop() {
     stopping=1
@@ -15,9 +22,21 @@ on_stop() {
 }
 trap on_stop TERM INT
 
+compositor_gone() {
+    [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] \
+        && [[ ! -d "${XDG_RUNTIME_DIR:-/run/user/$UID}/hypr/$HYPRLAND_INSTANCE_SIGNATURE" ]]
+}
+
 while :; do
+    if compositor_gone; then
+        echo "qs-supervise: compositor $HYPRLAND_INSTANCE_SIGNATURE is gone, exiting" >&2
+        exit 0
+    fi
+    started=$SECONDS
     qs "$@" &
     child=$!
+    # A stop signal that arrived between the fork and `child=` found no child to signal.
+    ((stopping)) && kill -TERM "$child" 2>/dev/null
     # `wait` returns early when a trapped signal arrives; keep waiting until qs is gone.
     wait "$child"
     status=$?
@@ -26,10 +45,13 @@ while :; do
     done
     child=""
     ((stopping)) && exit 0
-    echo "qs-supervise: qs exited (status $status), restarting in 1 s" >&2
-    sleep 1 &
+    ran=$((SECONDS - started))
+    ((ran >= 5)) && delay=1
+    echo "qs-supervise: qs exited (status $status) after ${ran} s, restarting in $delay s" >&2
+    sleep "$delay" &
     child=$!
     wait "$child"
     child=""
     ((stopping)) && exit 0
+    ((ran < 5)) && delay=$((delay * 2 > 30 ? 30 : delay * 2))
 done

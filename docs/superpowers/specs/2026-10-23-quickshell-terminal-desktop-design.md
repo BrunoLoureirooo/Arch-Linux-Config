@@ -23,7 +23,7 @@
 >   was added, `WallpaperState.qml` holds the wallpaper choice (with `preview`/`clearPreview` for the carousel),
 >   the rail widgets are in `rail/`. `Chamfer` is two closed filled polygons (Qt 6.11 `ShapePath` has no stroke gradient).
 > - **Rail** ignores exclusive zones; a 1 px invisible overlay surface reserves its width (direct-scanout trade-off).
-> - **`qs-supervise`** restarts qs 1 s after it exits (spec: within 2 s); xremap starts with `--watch=device` (re-grabs keyboards that reappear, e.g. after the headless toggle).
+> - **`qs-supervise`** restarts qs 1 s after it exits (spec: within 2 s), backing off (doubling up to 30 s) while qs dies within 5 s of starting, and exits when the compositor is gone; xremap starts with `--watch=device` (re-grabs keyboards that reappear, e.g. after the headless toggle).
 > - **`lid` and `headless` scripts** are now in the repo (`dot_local/bin/executable_lid`, `executable_headless`) and
 >   ported to the Lua IPC (`hyprctl eval 'hl.monitor(...)'`, `hyprctl dispatch 'hl.dsp.dpms(...)'`) with the hyprlang
 >   form as a fallback; `headless` now darkens the displays before cutting the peripherals (section 10).
