@@ -26,7 +26,7 @@ Personal Arch Linux dotfiles managed with [chezmoi](https://www.chezmoi.io/).
 ## Install
 
 ```sh
-chezmoi init --apply https://github.com/brunoLoureiro/dotfiles
+chezmoi init --apply https://github.com/BrunoLoureirooo/Arch-Linux-Config
 ```
 
 Or if already cloned:

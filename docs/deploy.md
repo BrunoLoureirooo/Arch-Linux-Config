@@ -187,7 +187,7 @@ xremap/config.yml, kitty/*, the three new `~/.local/bin` tools, `~/.local/share/
 `~/.local/bin/lid` and `~/.local/bin/headless` (above), and a changed
 waybar `config.jsonc` (the interim persistent-workspaces edit). The colour files (`colors.lua`,
 `colors.json`, `colors.conf`) are `create_` files: written once if absent, never overwritten
-afterwards, because `rice-palette` owns them. `docs/` and `tests/` are not deployed (`.chezmoiignore`).
+afterwards, because `rice-palette` owns them. `docs/`, `tests/` and the repo `README.md` are not deployed (`.chezmoiignore`).
 
 Apply (this branch is designed to go all at once, so apply everything):
 

@@ -27,7 +27,7 @@
 > - **`lid` and `headless` scripts** are now in the repo (`dot_local/bin/executable_lid`, `executable_headless`) and
 >   ported to the Lua IPC (`hyprctl eval 'hl.monitor(...)'`, `hyprctl dispatch 'hl.dsp.dpms(...)'`) with the hyprlang
 >   form as a fallback; `headless` now darkens the displays before cutting the peripherals (section 10).
-> - **`.chezmoiignore`** also lists `**/__pycache__` and `*.pyc`; the repo has a `.gitignore`.
+> - **`.chezmoiignore`** also lists `README.md` (the repo README is not deployed to `~/README.md`), `**/__pycache__` and `*.pyc`; the repo has a `.gitignore`.
 > - **Palette:** a grey or black wallpaper still gets a chromatic palette from matugen (the cyan/magenta
 >   fallback is not reached end to end); `rice-palette` writes its four files all-or-nothing with rollback.
 > - **`Super+Space`** calls `qs ipc call launcher toggle`; nothing is deployed until the whole branch is applied.
