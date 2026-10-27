@@ -17,6 +17,8 @@
 > - **Workspace 11** is also a default workspace on the laptop panel (so it starts in its own pool).
 > - **Pool hop `Ctrl+Alt+Up/Down`** (added, in section 6): same slot in the next/previous pool present on the
 >   focused screen, so the windows of a pool moved by an unplug or a lid close stay reachable.
+> - **Volume keys** (added, in section 6): `XF86Audio*` binds run `wpctl` (the VOL chip is read-only). No tray
+>   host: the blueman-applet and librepods tray icons are not shown (accepted; `docs/deploy.md` sections 1 and 12).
 > - **Files:** `Chip.qml`/`Meter.qml` live in `components/` with `Chamfer.qml` (not in `bar/`), `services/Screens.qml`
 >   was added, `WallpaperState.qml` holds the wallpaper choice (with `preview`/`clearPreview` for the carousel),
 >   the rail widgets are in `rail/`. `Chamfer` is two closed filled polygons (Qt 6.11 `ShapePath` has no stroke gradient).
@@ -246,6 +248,7 @@ All window-manager binds use `Super`, `Ctrl+Alt` or `Ctrl` with a digit; none of
 | Ctrl + Alt + W | carousel |
 | Ctrl + Alt + Shift + Q | exit Hyprland (was Super+M) |
 | Print | region screenshot (unchanged) |
+| XF86AudioRaiseVolume / LowerVolume / Mute / MicMute | volume ±5 % (capped at 100 %, repeats while held), mute, mic mute via `wpctl`; work on a locked screen. No brightness keys (brightnessctl is not installed) |
 | XF86Launch2 | headless toggle (`~/.local/bin/headless`, now in the repo, ported to the Lua config) |
 | lid switch on/off | `~/.local/bin/lid close` / `open` (now in the repo, ported to the Lua config) |
 

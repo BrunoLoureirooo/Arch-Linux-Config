@@ -30,6 +30,12 @@ repo and on disk for rollback (section 13).
 Behaviour changes you will notice immediately: the terminal is now `Ctrl+Alt+T` (not `Super+T`),
 exit is `Ctrl+Alt+Shift+Q`, and `Super+C/V/X...` act like `Ctrl+C/V/X...` (section 6).
 
+Accepted losses against the waybar bar: **there is no system tray**, so the `blueman-applet` and `librepods`
+icons (both still started by the autostart) are not shown and their menus are unreachable; the VOL chip is
+read-only (no scroll-to-change, no click for pavucontrol; use the volume keys or `pavucontrol` from the
+launcher); there is no backlight or temperature chip. If you need the tray, keep waybar's tray (section 11
+option 4) or ask for a Quickshell tray widget.
+
 The branch has to be what your chezmoi source directory (`~/.local/share/chezmoi`) has checked
 out before you apply, for example after merging the draft PR, or with
 `git -C ~/.local/share/chezmoi switch feat/quickshell-terminal-desktop`. To try it from another
@@ -303,12 +309,15 @@ Do these in order. Anything that fails: note it, and use section 13 if the deskt
 9. **Toasts replace mako.** `pgrep -x mako` must print nothing and the shell must own the notification
    name: `notify-send "test" "hello"` shows a cut-corner toast at the bottom-right of the main screen;
    a click dismisses it; at most three at once. `busctl --user list | grep Notifications` shows the owner.
-10. **Bluetooth widget.** The rail section lists connected devices with their battery when BlueZ reports
+10. **Volume keys and the tray.** The laptop's volume keys change the volume (`wpctl get-volume
+    @DEFAULT_AUDIO_SINK@` before and after, and the VOL chip follows), mute toggles, mic mute toggles the default
+    source. No tray: if you depend on the blueman or librepods tray menus, decide now (section 1).
+11. **Bluetooth widget.** The rail section lists connected devices with their battery when BlueZ reports
     one (hidden while nothing is connected). Connect a device and see it appear. AirPods left/right/case
     levels are not shown by design.
-11. **Status line / Claude limits.** Section 8. The claude section reads `no data` until you enable the
+12. **Status line / Claude limits.** Section 8. The claude section reads `no data` until you enable the
     status line and send one message.
-12. **Memory and CPU.** After 60 s idle on both screens:
+13. **Memory and CPU.** After 60 s idle on both screens:
 
     ```sh
     pid=$(pgrep -x qs | head -1)
@@ -320,7 +329,7 @@ Do these in order. Anything that fails: note it, and use section 13 if the deskt
     ```
 
     Budget and what to expect: section 11.
-13. **Collision sanity.** `Ctrl+Left/Right` word jump still works in a GUI text field (it is remapped from
+14. **Collision sanity.** `Ctrl+Left/Right` word jump still works in a GUI text field (it is remapped from
     `Alt+Left/Right`), `Ctrl+Alt+Left/Right` steps workspaces, nothing steps by accident.
 
 ## 6. Key scheme
@@ -362,6 +371,7 @@ jump, so workspace stepping is `Ctrl+Alt+Left/Right`). `tests/test_keymap_collis
 | Ctrl + Alt + W | carousel |
 | Ctrl + Alt + Shift + Q | exit Hyprland (was Super+M) |
 | Print | region screenshot (unchanged) |
+| XF86AudioRaiseVolume / LowerVolume / Mute / MicMute | volume ±5 % (capped at 100 %, repeats while held), mute, mic mute via `wpctl`; work on a locked screen. No brightness keys (brightnessctl is not installed) |
 | XF86Launch2 | headless toggle (`~/.local/bin/headless`, now in the repo, ported to the Lua config) |
 | lid switch on/off | `~/.local/bin/lid close` / `open` (now in the repo, ported to the Lua config) |
 
@@ -492,7 +502,7 @@ Your options:
 5. **Keep hyprpaper for the wallpaper** (saves about 82 MB USS): drop the `Wallpaper` block from
    `shell.qml` and restore `hl.exec_cmd("sleep 1 && hyprpaper")` in autostart. Same carousel caveat.
 
-Measure on your machine first (section 5, item 12), then decide.
+Measure on your machine first (section 5, item 13), then decide.
 
 <!-- KNOWN-ISSUES:BEGIN -->
 ## 12. Known issues and pending items
@@ -546,6 +556,8 @@ trade-off, not planned to change. The controller revises this block after the fi
   re-enabled it, `hyprctl keyword monitor "eDP-1, disable"` kept answering `ok` without disabling the output
   (the same command your pre-port script used). Fresh instances passed every time (3 runs in a row). It only
   matters after a rollback; `hyprctl monitors` tells you whether the panel really went away.
+- **No system tray host. [accepted/known]** blueman-applet and librepods icons are not shown; keep waybar's
+  tray or ask for a Quickshell tray widget. The VOL chip is read-only; the XF86Audio keys change the volume.
 <!-- KNOWN-ISSUES:END -->
 
 ## 13. Rollback

@@ -77,6 +77,7 @@ Mac-like scheme: Super is Command, Alt is Option, Control stays Control. All win
 | Ctrl + Alt + W | carousel |
 | Ctrl + Alt + Shift + Q | exit Hyprland (was Super+M) |
 | Print | region screenshot (unchanged) |
+| XF86AudioRaiseVolume / LowerVolume / Mute / MicMute | volume ±5 % (capped at 100 %, repeats while held), mute, mic mute via `wpctl`; work on a locked screen. No brightness keys (brightnessctl is not installed) |
 | XF86Launch2 | headless toggle (`~/.local/bin/headless`, now in the repo, ported to the Lua config) |
 | lid switch on/off | `~/.local/bin/lid close` / `open` (now in the repo, ported to the Lua config) |
 

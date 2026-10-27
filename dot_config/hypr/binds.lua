@@ -100,4 +100,13 @@ hl.bind("CTRL + ALT + SHIFT + Q",
 
 hl.bind("Print", hl.dsp.exec_cmd('grim -g "$(slurp)" ~/Pictures/screenshot_$(date +%s).png'))
 
+-- Volume keys (the old waybar chip took scroll/click; the new VOL chip is read-only).
+-- locked: they work on a locked or dark screen; the steps repeat while held, capped at 100 %.
+-- No brightness keys: brightnessctl is not installed.
+local sink, source = "@DEFAULT_AUDIO_SINK@", "@DEFAULT_AUDIO_SOURCE@"
+hl.bind("XF86AudioRaiseVolume", hl.dsp.exec_cmd("wpctl set-volume -l 1 " .. sink .. " 5%+"), { locked = true, repeating = true })
+hl.bind("XF86AudioLowerVolume", hl.dsp.exec_cmd("wpctl set-volume -l 1 " .. sink .. " 5%-"), { locked = true, repeating = true })
+hl.bind("XF86AudioMute", hl.dsp.exec_cmd("wpctl set-mute " .. sink .. " toggle"), { locked = true })
+hl.bind("XF86AudioMicMute", hl.dsp.exec_cmd("wpctl set-mute " .. source .. " toggle"), { locked = true })
+
 return M
