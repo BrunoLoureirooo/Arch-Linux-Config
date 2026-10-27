@@ -203,6 +203,21 @@ after leaving Hyprland. Then check the new config parses before you log out:
 Hyprland --verify-config --config ~/.config/hypr/hyprland.lua    # expect: config ok
 ```
 
+**Mask mako before the first login on the new config.** mako ships a D-Bus activation file
+(`/usr/share/dbus-1/services/fr.emersion.mako.service`, `SystemdService=mako.service`) that claims
+`org.freedesktop.Notifications`. Your user bus is dbus-broker and the systemd user environment has
+`WAYLAND_DISPLAY`, so any notification sent before the shell registers (an AirPods or blueman notice
+from the same `hyprland.start` batch, or the ~1-2 s gap while `qs-supervise` restarts qs) would start
+mako; the shell then only gets the name when mako leaves, which it never does, so toasts would silently
+never appear for the whole session. Prevent the activation:
+
+```sh
+systemctl --user mask mako.service      # or uninstall mako: sudo pacman -Rns mako
+```
+
+(`systemctl --user unmask mako.service` undoes it; section 13. The old `hyprland.conf` starts mako by its
+`exec-once` line, not through systemd, so the rollback session still gets mako.)
+
 Log out of Hyprland and log in again (needed for `hl.env`, the autostart and the `input` group).
 **When both exist, `~/.config/hypr/hyprland.lua` takes precedence over `hyprland.conf`**; checked in
 the rig (Hyprland 0.56.2 logs `Using lua config found at .../hyprland.lua`). `hyprland.conf` stays
@@ -312,7 +327,15 @@ Do these in order. Anything that fails: note it, and use section 13 if the deskt
    A symlink into `/usr/local/bin` is not recommended.
 9. **Toasts replace mako.** `pgrep -x mako` must print nothing and the shell must own the notification
    name: `notify-send "test" "hello"` shows a cut-corner toast at the bottom-right of the main screen;
-   a click dismisses it; at most three at once. `busctl --user list | grep Notifications` shows the owner.
+   a click dismisses it; at most three at once. The owner of the name must be the shell, not mako:
+
+   ```sh
+   busctl --user status org.freedesktop.Notifications | grep -E '^(PID|Comm)='   # want Comm=qs (or quickshell)
+   systemctl --user is-enabled mako.service                                     # want: masked (section 4)
+   ```
+
+   If `Comm=mako`, mako was activated before the shell (the mask is missing): mask it, `pkill -x mako`, and
+   the shell takes the name.
 10. **Volume keys and the tray.** The laptop's volume keys change the volume (`wpctl get-volume
     @DEFAULT_AUDIO_SINK@` before and after, and the VOL chip follows), mute toggles, mic mute toggles the default
     source. No tray: if you depend on the blueman or librepods tray menus, decide now (section 1).
@@ -562,6 +585,12 @@ trade-off, not planned to change. The controller revises this block after the fi
   matters after a rollback; `hyprctl monitors` tells you whether the panel really went away.
 - **No system tray host. [accepted/known]** blueman-applet and librepods icons are not shown; keep waybar's
   tray or ask for a Quickshell tray widget. The VOL chip is read-only; the XF86Audio keys change the volume.
+- **mako can take the notification name before the shell. [accepted/known; mitigation unverified]** mako's
+  D-Bus activation file claims `org.freedesktop.Notifications`; a notification sent before qs registers
+  activates mako and the shell's toasts never appear for that session. Mitigation: `systemctl --user mask
+  mako.service` before the first login (section 4), check with `busctl --user status
+  org.freedesktop.Notifications` (section 5, item 9). That masking blocks the activation under dbus-broker
+  was not tested (nothing was changed on your session).
 <!-- KNOWN-ISSUES:END -->
 
 ## 13. Rollback
@@ -620,7 +649,10 @@ cp -a ~/.config/hypr/hyprland.conf.bak.<stamp> ~/.config/hypr/hyprland.conf
 cp -a ~/.config/waybar/config.jsonc.bak.<stamp> ~/.config/waybar/config.jsonc
 cp -a ~/.config/hypr/hyprpaper.conf.bak.<stamp> ~/.config/hypr/hyprpaper.conf
 
-# 5. log out of Hyprland and log in again. Falling back to hyprland.conf starts the old programs
+# 5. let mako be D-Bus activated again (section 4 masked it)
+systemctl --user unmask mako.service
+
+# 6. log out of Hyprland and log in again. Falling back to hyprland.conf starts the old programs
 #    through its exec-once lines. (From a TTY, hyprctl and waybar need HYPRLAND_INSTANCE_SIGNATURE and
 #    WAYLAND_DISPLAY and will not work; and whether a plain `hyprctl reload` inside the running session
 #    drops the Lua config is untested, so log out and in.)
