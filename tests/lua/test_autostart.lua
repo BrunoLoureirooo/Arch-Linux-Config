@@ -19,7 +19,7 @@ local want = {
     "blueman-applet",
     "~/.local/bin/librepods --start-minimized",
     "~/.local/bin/airpods-autoconnect",
-    "xremap ~/.config/xremap/config.yml",
+    "xremap --watch=device ~/.config/xremap/config.yml",
 }
 local got = table.concat(execs, " | ")
 assert(#execs == #want, "exec count " .. #execs .. ": " .. got)

@@ -8,5 +8,7 @@ hl.on("hyprland.start", function()
     hl.exec_cmd("blueman-applet")
     hl.exec_cmd("~/.local/bin/librepods --start-minimized")
     hl.exec_cmd("~/.local/bin/airpods-autoconnect")
-    hl.exec_cmd("xremap ~/.config/xremap/config.yml")
+    -- --watch=device: grab keyboards that appear later (a dock, or the G502 and the Semico
+    -- keyboard coming back as new devices after headless-peripherals restores their power).
+    hl.exec_cmd("xremap --watch=device ~/.config/xremap/config.yml")
 end)

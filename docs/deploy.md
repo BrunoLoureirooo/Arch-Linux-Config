@@ -120,11 +120,12 @@ Check after re-login: `xremap --list-devices` lists your keyboards and mouse wit
 permission test; `xremap --list-windows` only queries the compositor for window class names and does
 not test device access), and `pgrep -a xremap` should show the process after Hyprland starts.
 
-**Hot-plug caveat.** The autostart line runs `xremap ~/.config/xremap/config.yml` without
-`--watch`, so a keyboard plugged in after xremap started (a dock keyboard) is not remapped until
-xremap is restarted. If that matters to you, change the line in `dot_config/hypr/autostart.lua` to
-`hl.exec_cmd("xremap --watch ~/.config/xremap/config.yml")` (see `xremap --help` for the `--watch`
-targets) and re-apply. This was left off on purpose and is untested.
+**Hot-plug.** The autostart line runs `xremap --watch=device ~/.config/xremap/config.yml`, so xremap also
+grabs keyboards that appear after it started: a dock keyboard, and the G502 and the Semico keyboard, which
+come back as NEW input devices after the headless toggle restores their USB power. Without `--watch` the
+Mac shortcuts would silently stop on the external keyboard until the next login. (`--watch=device` was
+checked against xremap 0.15.15's `--help` and with `--validate-config` on this config; xremap re-grabbing
+a real re-plugged device was not tested.)
 
 ## 4. Diff, back up, apply, log out and in
 
@@ -257,6 +258,8 @@ Do these in order. Anything that fails: note it, and use section 13 if the deskt
    keyboard lose power. Wait more than 2 s (double-tap guard), press it again: the peripherals come back
    first, then the screens. If the screens did not go dark, the script printed `dpms off failed;
    peripherals left powered` and did not cut anything (run `~/.local/bin/headless` in a terminal to see it).
+   After the restore the external keyboard is a new input device; xremap picks it up again
+   (`--watch=device`, section 3), so `Super+C` must still copy in Firefox from the Semico keyboard.
 4. **BenQ matching.** `hyprctl monitors`: the BenQ must show description `BNQ BenQ EX2510S K8M02386019`
    (it is matched by description, not by the port name) at `0x0`, and `eDP-1` at `1920x0`. This was not
    testable in the rig (headless outputs have no description). If the BenQ is not matched, the pool
@@ -535,7 +538,7 @@ trade-off, not planned to change. The controller revises this block after the fi
 - **The memory budget is not met.** Section 11. Owner decision pending.
 - **NET shows the default-route interface name** (read from `/proc/net/route`), not an SSID. NetworkManager
   is not running on this machine (iwd + systemd-networkd), so nmcli is not used. **[accepted/known]**
-- **xremap runs without `--watch`, and fails silently without permissions.** Section 3. **[accepted/known]**
+- **xremap fails silently without permissions.** Section 3. It runs with `--watch=device` (re-grabs keyboards that reappear); that re-grab is untested on real devices. **[accepted/known]**
 - **Carousel first open retains about +60 MB RSS** in the rig, then plateaus (no leak seen); worth
   checking on your machine. **[accepted/known]**
 - **`lid close` under the hyprlang rollback config may silently do nothing. [accepted/known]** In one rig
