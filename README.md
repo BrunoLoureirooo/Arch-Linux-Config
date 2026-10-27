@@ -68,7 +68,7 @@ Mac-like scheme: Super is Command, Alt is Option, Control stays Control. All win
 | Super + Alt + ←↑↓→ or h j k l | focus window |
 | Super + Alt + Shift + ←↑↓→ or h j k l | move window (crosses to the other screen at an edge) |
 | Super + the key under Esc (code:49) | focus the other monitor (bound by keycode: on the owner's pt layout that key's keysym is backslash, not grave) |
-| Super + Tab | cycle windows on this screen |
+| Super + Tab | cycle windows on the current workspace (not across the screen or the other workspaces) |
 | Super + Space | launcher |
 | Super + Q | close window |
 | Super + Ctrl + F | fullscreen |
