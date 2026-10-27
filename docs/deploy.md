@@ -41,6 +41,10 @@ out before you apply, for example after merging the draft PR, or with
 `git -C ~/.local/share/chezmoi switch feat/quickshell-terminal-desktop`. To try it from another
 checkout, pass its path: `chezmoi -S /path/to/checkout diff` and `chezmoi -S /path/to/checkout apply`.
 
+**Before that, merge the small prerequisite PR "chore: sync live hypr/hyprpaper/waybar configs into the
+repo" into `main`** (section 13 explains why: without it `main`'s `hyprland.conf` is a stale stub and a
+rollback to `main` would overwrite your real config).
+
 ## 2. Prerequisites
 
 Official repos:
@@ -565,16 +569,38 @@ trade-off, not planned to change. The controller revises this block after the fi
 Back to waybar + wofi + mako + hyprpaper and the old `hyprland.conf`. Use a TTY (`Ctrl+Alt+F3`) if the
 session is unusable. Backups are `<file>.bak.<stamp>` next to the originals (section 4).
 
+**Prerequisite (before you merge or apply this branch): the live-config sync PR.** On `main`,
+`dot_config/hypr/hyprland.conf` is an old stub: no lid or headless binds, no BenQ `desc:` monitor line,
+no `XDG_MENU_PREFIX`, no movewindow binds. Only commit 88a1c01 on this branch synced your live file into
+the repo. That commit is also offered on its own as a small PR titled **"chore: sync live
+hypr/hyprpaper/waybar configs into the repo"**: merge that PR into `main` FIRST. Then `main`'s
+`hyprland.conf` (and `hyprpaper.conf`, waybar `config.jsonc`) are your real configs, and going back to
+`main` is a safe rollback.
+
 **Step 0: switch the chezmoi source back first**, or the next routine `chezmoi apply` brings
-`hyprland.lua` and everything else back. While the source is still on the feature branch:
+`hyprland.lua` and everything else back.
 
-```sh
-git -C ~/.local/share/chezmoi switch main      # the feature branch is feat/quickshell-terminal-desktop
-```
+- **If the prerequisite PR was merged into `main`:** while the source is still on the feature branch,
 
-If you already merged the branch into main, revert the merge in the repo instead (or run `chezmoi
-apply` only for the paths you want, with the rollback files in place and `hyprland.lua` removed from
-the source). Only then do the steps below.
+  ```sh
+  git -C ~/.local/share/chezmoi switch main      # the feature branch is feat/quickshell-terminal-desktop
+  ```
+
+  If you already merged the feature branch into main, revert that merge in the repo instead.
+- **If the prerequisite PR was NOT merged:** do NOT switch to `main` (or to any branch whose
+  `hyprland.conf` is the stale stub): your next `chezmoi apply` would overwrite the restored live
+  `hyprland.conf` with it, silently dropping the lid/headless binds and the BenQ line. Stay on the feature
+  branch and take only the Lua entry point out of the source, committed locally:
+
+  ```sh
+  git -C ~/.local/share/chezmoi rm dot_config/hypr/hyprland.lua
+  git -C ~/.local/share/chezmoi commit -m "rollback: back to hyprland.conf"
+  ```
+
+  (chezmoi does not delete `~/.config/hypr/hyprland.lua` itself; step 2 below moves it away.) The
+  feature branch's `hyprland.conf` is the synced live copy, so `chezmoi apply` keeps it correct.
+
+Only then do the steps below.
 
 ```sh
 # 1. stop the new pieces (the supervisor first, or it restarts qs)
@@ -584,8 +610,9 @@ pkill -x xremap
 # 2. take the Lua config out of the way: Hyprland then falls back to hyprland.conf
 mv ~/.config/hypr/hyprland.lua ~/.config/hypr/hyprland.lua.disabled
 
-# 3. make sure hyprland.conf is the pre-migration one (chezmoi deploys the repo copy, which is the live
-#    copy synced before the build; restore the backup if in doubt)
+# 3. make sure hyprland.conf is the pre-migration one. After step 0 the source's copy is your live file as
+#    synced on 2026-10-23 (prerequisite PR on main, or the feature branch), so chezmoi keeps it; restore the
+#    backup anyway if you edited the live file after that date, or if in doubt
 ls ~/.config/hypr/hyprland.conf.bak.*
 cp -a ~/.config/hypr/hyprland.conf.bak.<stamp> ~/.config/hypr/hyprland.conf
 
