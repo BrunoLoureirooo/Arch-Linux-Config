@@ -417,6 +417,7 @@ windows during the build.
 4. In Firefox and VS Code: `Super+C/V/X/A/Z/F/S` act as `Ctrl+` the same key; `Super+Left/Right` go to line start/end; `Alt+Left/Right` move by word (note: `Alt+Left` in Firefox no longer means Back).
 5. In a JetBrains IDE: repeat 4; check `Super+arrows`, `Alt+arrows` and `Alt+Backspace`; confirm with `hyprctl clients` that the class names are matched (kitty is excluded by class `kitty`; `xremap --list-windows` prints the names xremap sees).
 6. Confirm `Ctrl+1..5`, `Ctrl+Alt+arrows` and `Super+Space` still trigger Hyprland binds and are not triggered by any remapped key.
+7. **Integrated terminals are not kitty.** In the VS Code or JetBrains integrated terminal, `Super+C` becomes `Ctrl+C` (xremap only skips the kitty window class): with nothing selected it interrupts the running process (SIGINT) instead of copying. Run `sleep 100` there and press `Super+C` to see it; use the IDE's own copy binding (or select first) inside those terminals.
 
 ## 8. Claude limits
 
