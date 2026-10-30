@@ -739,7 +739,7 @@ Nothing below was observed on your machine. "Rig" means the headless nested Hypr
 **Shell**
 - Everything on your real screens: scaling, 144 Hz, real GPU rendering, the rail font size against the render.
 - Taking `org.freedesktop.Notifications` on the live bus once mako is gone; real application notifications; launching real apps from the launcher (only fake `.desktop` entries were executed); a physical keyboard into the launcher (the rig needed a held virtual keyboard); the `Super+Space` bind end to end; the `Ctrl+Alt+W` bind opening the carousel.
-- Real `hyprctl reload` and kitty `SIGUSR1` after `rice-palette apply` (stubbed in the rig); the generated btop theme in real btop; the chezmoi-deployed layout of `~/.local/bin` finding `~/.local/share/rice`.
+- Real `hyprctl reload` and kitty `SIGUSR1` after `rice-palette apply` (stubbed in the rig); the generated btop theme in btop on your real terminal (btop 1.4.7 was run in a pseudo-terminal with a temp HOME: `color_theme = "rice"` picks up a `rice.theme` rendered from the seed palette, and with the file missing btop starts on its built-in colours); the chezmoi-deployed layout of `~/.local/bin` finding `~/.local/share/rice`.
 - Your actual wallpapers (JPEG/WebP size parsing is covered by fixtures only), the carousel under rapid scrolling, the startup wallpaper race (guarded but never reproduced).
 - Media players other than the one the rig could read; the rail with a 15 % battery row; real PipeWire volume changes; clicking a bar cell with a real pointer.
 - Real connected Bluetooth devices and their battery values (none were connected during the build); whether BlueZ reports a single AirPods level at all.
