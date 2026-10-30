@@ -47,6 +47,9 @@ Singleton {
     property list<real> netHistory: []  // up + down bytes/s, oldest first
     readonly property int historyLength: 24
 
+    // Emitted on every shared 2 s tick (the Clock service follows it: no timer of its own).
+    signal tick()
+
     // Sources. Plain properties so a test config can point them elsewhere.
     property string statPath: "/proc/stat"
     property string memPath: "/proc/meminfo"
@@ -226,6 +229,7 @@ Singleton {
             if (root.gpuPath !== "" && !root.nvLive)
                 gpuFile.reload();
             root.nvTick(Date.now());
+            root.tick();
         }
     }
 

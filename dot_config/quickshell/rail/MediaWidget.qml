@@ -49,6 +49,7 @@ ColumnLayout {
             id: title
             width: Math.min(implicitWidth, parent.width)
             text: root.player ? (root.player.trackTitle || root.player.identity || "unknown") : ""
+            textFormat: Text.PlainText  // MPRIS metadata: never StyledText (no <img> fetches)
             elide: Text.ElideRight
             color: Theme.fg
             font.family: Theme.font
@@ -63,6 +64,7 @@ ColumnLayout {
             width: Math.max(0, parent.width - x)
             visible: width > 0 && text !== ""
             text: root.player ? root.player.trackArtist : ""
+            textFormat: Text.PlainText
             elide: Text.ElideRight
             color: Theme.dim
             font.family: Theme.font

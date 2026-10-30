@@ -188,6 +188,7 @@ ColumnLayout {
         Caption {
             anchors.horizontalCenter: parent.horizontalCenter
             text: Stats.netConn !== "" ? Stats.netConn : "--"
+            textFormat: Text.PlainText  // an interface name: not the Caption's StyledText
         }
         Caption {
             anchors.right: parent.right

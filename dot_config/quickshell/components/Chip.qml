@@ -39,6 +39,7 @@ Row {
         anchors.verticalCenter: parent.verticalCenter
         visible: root.text !== ""
         text: root.text
+        textFormat: Text.PlainText  // may carry an interface name
         color: Theme.a1
         font.family: Theme.font
         font.pixelSize: root.px

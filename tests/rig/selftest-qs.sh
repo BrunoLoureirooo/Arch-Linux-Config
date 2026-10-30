@@ -33,6 +33,11 @@
 #      fixtures, stream values and the VRM row, [N/A], timeout, immediate exit, back-off
 #      restarts, runtime_status not active, missing command, the probe path on a fake drm
 #      tree, opt-in off by default and the rig guard, no fake left after qs stops.
+#  12. Clock service and untrusted text (through tests/rig/clock-text.qml, TZ=Europe/Lisbon):
+#      bar and rail clocks follow a mocked time across the repeated DST hour (01:59 WEST ->
+#      01:00 WET) and a big jump within one 2 s tick, the log stays quiet; a window title,
+#      MPRIS title/artist and a Bluetooth name holding <b>, <br> and <img src=http://...>
+#      render as literal plain text and no HTTP request reaches a local listener.
 # Every qs this script starts runs on a private session bus (qs-run.sh starts its own
 # when none is given), so the shell's NotificationServer never meets the live mako.
 # Needs no running rig (starts and stops its own). Screenshots land in
@@ -56,7 +61,9 @@ fake_pid=""
 bus_pid=""
 sup_bus_pid=""
 holder_pid=""
+lst_pid=""
 cleanup() {
+    [[ -z "$lst_pid" ]] || kill -TERM "$lst_pid" 2>/dev/null || true
     [[ -z "$holder_pid" ]] || kill -TERM "$holder_pid" 2>/dev/null || true
     [[ -z "$sup_pid" ]] || kill -TERM "$sup_pid" 2>/dev/null || true
     [[ -z "$kitty_pid" ]] || kill -TERM "$kitty_pid" 2>/dev/null || true
@@ -1879,6 +1886,126 @@ for optin in none zero guard; do
 done
 [[ "$(pgrep -x nvidia-smi || true)" == "$real_nv_before" ]] && pass "no real nvidia-smi was started by section 11" \
     || fail "nvidia-smi processes changed: '$real_nv_before' -> '$(pgrep -x nvidia-smi || true)'"
+
+# --- 12. Clock service and untrusted text (FIX-B) ---------------------------------------
+# Through tests/rig/clock-text.qml (bars and the production rail) with TZ=Europe/Lisbon, on
+# a fresh rig and qs-run.sh's own private bus.
+"$R/nested-hypr.sh" stop >/dev/null
+"$R/nested-hypr.sh" start "$R/full.lua" >/dev/null
+staged=$(TZ=Europe/Lisbon "$R/qs-run.sh" start --restage --entry "$R/clock-text.qml")
+pbus=$("$R/qs-run.sh" status | sed -n 's/.* bus=\([^ ]*\).*/\1/p')
+case "$pbus" in
+    "" | *"path=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/bus"*) echo "REFUSING: section 12 needs a private bus, got '$pbus'"; exit 1 ;;
+esac
+sleep 2
+n0=$(logn)
+pj() { "$R/qs-run.sh" ipc call probe "$@"; }
+ms() { echo $(( $(date -u -d "$1" +%s) * 1000 )); }
+clk() { pj clock | spy "(d['bar:DP-1'][8], d['bar:DP-1'][9], d['bar:eDP-1'][8], d['rail'])"; }
+
+# a. No SystemClock anywhere in the shell; one shared clock.
+[[ -z "$(grep -rn 'SystemClock *{' "$R/../../dot_config/quickshell" || true)" ]] \
+    && pass "no SystemClock left in dot_config/quickshell" || fail "SystemClock still used: $(grep -rn 'SystemClock *{' "$R/../../dot_config/quickshell")"
+
+# b. The repeated hour of the autumn DST change: 01:59 WEST, then 01:00 WET (the clock goes
+#    back one hour), each within one 2 s tick, on both bars and the rail.
+pj mock "$(ms '2026-10-25 00:59:30')"; sleep 2.5
+c1=$(clk)
+pj mock "$(ms '2026-10-25 01:00:30')"; sleep 2.5
+c2=$(clk)
+pj mock "$(ms '2026-10-25 01:59:10')"; sleep 2.5
+c3=$(clk)
+[[ "$c1" == "('01:59', 'SUN OCT 25', '01:59', ['01:59', 'WEST', 'SUN OCT 25 2026'])" \
+    && "$c2" == "('01:00', 'SUN OCT 25', '01:00', ['01:00', 'WET', 'SUN OCT 25 2026'])" \
+    && "$c3" == "('01:59', 'SUN OCT 25', '01:59', ['01:59', 'WET', 'SUN OCT 25 2026'])" ]] \
+    && pass "DST: 01:59 WEST -> 01:00 WET (back one hour) -> 01:59 WET on both bars and the rail" \
+    || fail "DST clock: $c1 | $c2 | $c3"
+# Inside the repeated hour the log stays quiet (SystemClock logged ~2,200 warnings/s here).
+nq=$(logn)
+sleep 6
+[[ "$(logn)" == "$nq" ]] && pass "repeated hour: no log growth over 6 s" || { fail "log grew during the repeated hour"; "$R/qs-run.sh" log | tail -n +"$((nq + 1))" | head -5; }
+
+# c. A big jump (as after a suspend/resume) shows within one tick; back to the real time.
+pj mock "$(ms '2026-10-25 13:37:00')"; sleep 2.5
+c4=$(clk)
+pj real; sleep 2.5
+c5=$(pj clock | spy "d['bar:DP-1'][8]")
+now5=$(TZ=Europe/Lisbon date +%H:%M); prev5=$(TZ=Europe/Lisbon date -d '-1 min' +%H:%M)
+[[ "$c4" == "('13:37', 'SUN OCT 25', '13:37', ['13:37', 'WET', 'SUN OCT 25 2026'])" && ( "$c5" == "$now5" || "$c5" == "$prev5" ) ]] \
+    && pass "jump to 13:37 shown within one tick; real time again ($c5)" || fail "jump/real: $c4 | $c5 (now $now5)"
+
+# d. Untrusted strings. A local listener records every connection: an <img src> rendered
+#    as StyledText would make the QML engine fetch it.
+lport=$(python3 -I -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
+lhits="$tmp/c12-hits"
+: >"$lhits"
+python3 -I - "$lport" "$lhits" <<'PY' &
+import socket, sys
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", int(sys.argv[1]))); s.listen(8)
+while True:
+    c, a = s.accept()
+    open(sys.argv[2], "a").write(f"connection from {a}\n")
+    c.close()
+PY
+lst_pid=$!
+sleep 0.5
+img() { echo "<img src=\"http://127.0.0.1:$lport/$1.png\">"; }
+# Positive control: the listener sees a real request.
+python3 -I -c "import urllib.request,sys
+try: urllib.request.urlopen(sys.argv[1], timeout=2)
+except Exception: pass" "http://127.0.0.1:$lport/control.png"
+sleep 0.3
+ctl=$(wc -l <"$lhits")
+: >"$lhits"
+t_title="<b>Bold</b><br>Title $(img title)"
+H dispatch 'hl.dsp.focus({ monitor = "DP-1" })' >/dev/null
+"$R/run.sh" env HOME="$staged" XDG_CONFIG_HOME="$staged/.config" XDG_CACHE_HOME="$staged/.cache" \
+    XDG_STATE_HOME="$staged/.local/state" XDG_DATA_HOME="$staged/.local/share" \
+    DBUS_SESSION_BUS_ADDRESS="$pbus" kitty --config=NONE --title "$t_title" sh -c 'sleep 600' \
+    >"$tmp/kitty12.out" 2>&1 </dev/null &
+kitty_pid=$!
+t_media="<b>Song</b><br>$(img media)"
+t_artist="<i>Artist</i> $(img artist)"
+DBUS_SESSION_BUS_ADDRESS="$pbus" python3 -I "$R/fake-mpris.py" "$t_media" "$t_artist" 200 >"$tmp/fake12.out" 2>&1 &
+fake_pid=$!
+t_bt="<font color=\"red\">Buds</font><br>$(img bt)"
+pj setBt "$t_bt"
+for _ in $(seq 40); do
+    [[ "$(pj untrusted | spy "len([t for t in d if 'Bold' in t['text'] or 'Song' in t['text'] or 'Artist' in t['text'] or 'Buds' in t['text']])")" -ge 5 ]] && break
+    sleep 0.3
+done
+sleep 2
+u=$(pj untrusted)
+echo "$u" | python3 -I -c "
+import json, sys
+d = json.load(sys.stdin)
+want = {'title': sys.argv[1], 'media': sys.argv[2], 'artist': sys.argv[3], 'bt': sys.argv[4]}
+seen = {k: [t for t in d if t['text'] == v] for k, v in want.items()}
+bad = []
+for k, ts in seen.items():
+    if not ts:
+        bad.append(k + ': not shown')
+    for t in ts:
+        if not t['plain'] or t['lines'] != 1:
+            bad.append(f\"{k} on {t['where']}: plain={t['plain']} lines={t['lines']}\")
+print('ok' if not bad else '; '.join(bad))
+print(' '.join(f'{k}x{len(v)}' for k, v in seen.items()))
+" "$t_title" "$t_media" "$t_artist" "$t_bt" >"$tmp/c12-verdict"
+[[ "$(head -1 "$tmp/c12-verdict")" == ok ]] \
+    && pass "window title, MPRIS title/artist, Bluetooth name: literal plain text on one line ($(sed -n 2p "$tmp/c12-verdict"))" \
+    || fail "untrusted text: $(cat "$tmp/c12-verdict")"
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-untrusted-DP-1.png" >/dev/null
+[[ "$ctl" == 1 && ! -s "$lhits" ]] && pass "no HTTP request from the shell (listener positive control: $ctl connection)" \
+    || fail "listener: control $ctl, shell connections: $(cat "$lhits")"
+# e. The Bluetooth rows torn down while bound: no TypeError.
+pj clearBt; sleep 0.5
+kill -TERM "$fake_pid" 2>/dev/null || true; wait "$fake_pid" 2>/dev/null || true; fake_pid=""
+kill -TERM "$kitty_pid" 2>/dev/null || true; wait "$kitty_pid" 2>/dev/null || true; kitty_pid=""
+kill -TERM "$lst_pid" 2>/dev/null || true; wait "$lst_pid" 2>/dev/null || true; lst_pid=""
+sleep 1
+[[ -z "$(warns_since "$n0")" ]] && pass "qs log: no ERROR/WARN in section 12" || { fail "qs log section 12"; warns_since "$n0"; }
+"$R/qs-run.sh" stop >/dev/null
 
 "$R/nested-hypr.sh" stop >/dev/null
 trap - EXIT

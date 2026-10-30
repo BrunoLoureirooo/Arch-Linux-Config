@@ -64,8 +64,8 @@ ColumnLayout {
         RowLayout {
             id: row
             required property var modelData
-            readonly property bool hasBattery: modelData.batteryAvailable === true
-            readonly property int pct: Math.max(0, Math.min(100, Math.round((modelData.battery || 0) * 100)))
+            readonly property bool hasBattery: modelData?.batteryAvailable === true
+            readonly property int pct: Math.max(0, Math.min(100, Math.round((modelData?.battery || 0) * 100)))
 
             Layout.fillWidth: true
             spacing: Math.round(root.px * 0.55)
@@ -86,7 +86,8 @@ ColumnLayout {
 
             Text {
                 Layout.fillWidth: true
-                text: row.modelData.name || ""
+                text: row.modelData?.name || ""
+                textFormat: Text.PlainText  // a device name: never StyledText
                 elide: Text.ElideRight
                 color: Theme.fg
                 font.family: Theme.font

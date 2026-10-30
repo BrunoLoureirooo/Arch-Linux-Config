@@ -47,11 +47,6 @@ PanelWindow {
     // Volume is only valid on a bound node.
     PwObjectTracker { objects: [bar.sink] }
 
-    SystemClock {
-        id: clock
-        precision: SystemClock.Minutes
-    }
-
     // Bottom rule: 1px line with a short a1 segment on the left (7em).
     Rectangle {
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
@@ -109,6 +104,7 @@ PanelWindow {
             // Never run into the clock.
             width: Math.max(0, Math.min(implicitWidth, centre.x - bar.gap - left.x - x))
             text: bar.title
+            textFormat: Text.PlainText  // a window title: never StyledText (no <img> fetches)
             elide: Text.ElideRight
             color: Theme.fg
             font.family: Theme.font
@@ -123,7 +119,7 @@ PanelWindow {
 
         Text {
             anchors.verticalCenter: parent.verticalCenter
-            text: Qt.formatDateTime(clock.date, "HH:mm")
+            text: Qt.formatDateTime(Clock.date, "HH:mm")
             color: Theme.fg
             font.family: Theme.font
             font.pixelSize: bar.px
@@ -134,7 +130,7 @@ PanelWindow {
         Text {
             anchors.verticalCenter: parent.verticalCenter
             // The render shows "FRI OCT 23"; C locale so names stay English.
-            text: Qt.locale("C").toString(clock.date, "ddd MMM dd").toUpperCase()
+            text: Qt.locale("C").toString(Clock.date, "ddd MMM dd").toUpperCase()
             color: Theme.dim
             font.family: Theme.font
             font.pixelSize: bar.px
