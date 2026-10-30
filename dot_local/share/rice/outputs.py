@@ -78,6 +78,19 @@ def render_hypr(tokens):
             "}\n")
 
 
+def hypr_border_lua(tokens):
+    """The Lua that `hyprctl eval` runs to recolour the borders of a running session.
+
+    The same colours as render_hypr (and hyprland.lua's col block), set at runtime so
+    nothing has to reload the config (a reload re-applies the monitor lines and would
+    light a panel the lid script disabled).
+    """
+    a1, a2, line = (tokens[k].lstrip("#") for k in ("a1", "a2", "line"))
+    return ("hl.config({ general = { col = { "
+            f'active_border = {{ colors = {{ "rgba({a1}ff)", "rgba({a2}ff)" }}, angle = 45 }}, '
+            f'inactive_border = "rgba({line}ff)" }} }} }})')
+
+
 def _mix(a, b, f):
     ca = [int(a[i:i + 2], 16) for i in (1, 3, 5)]
     cb = [int(b[i:i + 2], 16) for i in (1, 3, 5)]

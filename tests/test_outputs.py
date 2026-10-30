@@ -244,15 +244,18 @@ class TestCli(Sandbox):
         self.assertNotEqual(self.run_cli().returncode, 0)
         self.assertNotEqual(self.run_cli("frobnicate", "x").returncode, 0)
 
-    def _stubbed(self, stub_body, no_reload):
+    def _stubbed(self, stub_body, no_reload, img=None):
+        # pkill and hyprctl are stubbed through PATH: the CLI must keep resolving them
+        # through PATH, or this test would signal the real kitty / reach the real Hyprland.
         stubs = self.work / "stubs"
         stubs.mkdir(exist_ok=True)
         log = self.work / "calls.log"
         for n in ("pkill", "hyprctl"):
-            (stubs / n).write_text(f"#!/bin/sh\necho {n} >> {log}\n{stub_body}\n")
+            (stubs / n).write_text(f"#!/bin/sh\nprintf '%s\\n' \"{n} $*\" >> {log}\n{stub_body}\n")
             (stubs / n).chmod(0o755)
-        img = self.work / "a.png"
-        img.write_bytes(png(8, 8))
+        if img is None:
+            img = self.work / "a.png"
+            img.write_bytes(png(8, 8))
         env = dict(os.environ, HOME=str(self.home), RICE_MATUGEN=str(self.fake_matugen()),
                    PATH=f"{stubs}:{os.environ['PATH']}")
         env.pop("RICE_NO_RELOAD", None)
@@ -262,16 +265,69 @@ class TestCli(Sandbox):
                            capture_output=True, text=True)
         return r, log
 
+    def calls(self, log):
+        return log.read_text().splitlines() if log.exists() else []
+
     def test_no_reload_env_skips_reload(self):
         r, log = self._stubbed("exit 0", True)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertFalse(log.exists())
 
-    def test_reload_runs_and_failure_only_warns(self):
+    def test_recolour_runs_and_failure_only_warns(self):
         r, log = self._stubbed("exit 1", False)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(sorted(log.read_text().split()), ["hyprctl", "pkill"])
+        self.assertEqual(sorted(c.split()[0] for c in self.calls(log)), ["hyprctl", "pkill"])
         self.assertIn("warning", r.stderr)
+
+    def test_never_reloads_hyprland(self):
+        # A reload re-runs hyprland.lua, whose monitor line re-enables a closed lid's panel.
+        r, log = self._stubbed("echo ok", False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stderr, "")
+        calls = self.calls(log)
+        self.assertNotIn("reload", " ".join(calls))
+        self.assertIn("pkill -USR1 -x kitty", calls)
+        hypr = [c for c in calls if c.startswith("hyprctl ")]
+        self.assertEqual(len(hypr), 1, calls)
+        tokens = json.loads((self.home / ".config/quickshell/colors.json").read_text())
+        a1, a2, line = (tokens[k].lstrip("#") for k in ("a1", "a2", "line"))
+        self.assertEqual(hypr[0], "hyprctl eval " + outputs.hypr_border_lua(tokens))
+        lua = outputs.hypr_border_lua(tokens)
+        for want in (f'"rgba({a1}ff)"', f'"rgba({a2}ff)"', f'"rgba({line}ff)"', "angle = 45",
+                     "active_border", "inactive_border"):
+            self.assertIn(want, lua)
+
+    def test_eval_refused_only_warns(self):
+        # A hyprlang session answers eval with an error text and exit 0.
+        r, log = self._stubbed("echo 'eval is only supported with the lua config manager'", False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("warning", r.stderr)
+        self.assertEqual(len(r.stderr.strip().splitlines()), 1, r.stderr)
+
+    def test_colors_lua_untouched_when_unchanged(self):
+        img = self.work / "a.png"
+        img.write_bytes(png(8, 8))
+        r, _ = self._stubbed("echo ok", False, img)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lua = self.home / ".config/hypr/colors.lua"
+        before = lua.stat()
+        r, _ = self._stubbed("echo ok", False, img)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        after = lua.stat()
+        self.assertEqual((before.st_ino, before.st_mtime_ns), (after.st_ino, after.st_mtime_ns))
+
+    def test_hypr_border_lua_is_valid_lua(self):
+        if not LUA:
+            self.skipTest("no lua interpreter")
+        tokens = dict(NEON_RAIN)
+        code = ("local got; hl = { config = function(t) got = t end }\n"
+                + outputs.hypr_border_lua(tokens) + "\n"
+                "local c = got.general.col\n"
+                "print(c.active_border.colors[1], c.active_border.colors[2], c.active_border.angle, c.inactive_border)\n")
+        r = subprocess.run([LUA, "-"], input=code, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        a1, a2, line = (tokens[k].lstrip("#") for k in ("a1", "a2", "line"))
+        self.assertEqual(r.stdout.split(), [f"rgba({a1}ff)", f"rgba({a2}ff)", "45", f"rgba({line}ff)"])
 
 
     # ---- fix round 1 ----

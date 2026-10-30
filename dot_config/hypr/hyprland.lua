@@ -40,7 +40,20 @@ hl.env("XDG_MENU_PREFIX", "arch-")
 -- colors.lua is generated (seeded by chezmoi from create_colors.lua, then
 -- rewritten by rice-palette). If it is missing or broken, fall back to the seed
 -- tokens instead of erroring, so the rest of this file (binds) still loads.
-local ok, c = pcall(require, "colors")
+-- Read with loadfile, NOT require: Hyprland's autoreload watches every file require()
+-- loaded, and a reload re-applies the monitor lines above, lighting the panel that
+-- `lid close` disabled. rice-palette rewrites colors.lua on every palette apply (and
+-- recolours the running session itself through `hyprctl eval`), so that write must not
+-- reload the config (tests/hypr/palette_lid.sh).
+local function load_colors()
+    local dir = debug.getinfo(1, "S").source:match("^@(.*)/[^/]*$")
+    local chunk = dir and loadfile(dir .. "/colors.lua")
+    if not chunk then
+        return false, nil
+    end
+    return pcall(chunk)
+end
+local ok, c = load_colors()
 if not ok or type(c) ~= "table" then
     c = { active = { "rgba(00f0ffff)", "rgba(ff2e88ff)" }, inactive = "rgba(1b1d30ff)" }
 end

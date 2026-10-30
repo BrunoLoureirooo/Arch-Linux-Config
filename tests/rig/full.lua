@@ -4,7 +4,8 @@
 --
 -- * autostart.lua is never loaded: it would start waybar, mako, blueman-applet and
 --   the librepods/airpods tools, which touch the real Bluetooth stack.
--- * colors comes from the chezmoi seed (create_colors.lua -> colors.lua).
+-- * colors: the repo holds only the seed create_colors.lua, so hyprland.lua's
+--   loadfile of colors.lua finds nothing and uses its built-in seed tokens.
 -- * the rig's headless DP-1 stands in for the BenQ (left of eDP-1, at 0x0).
 -- Exec binds (launchers, lid, headless, ...) are registered but tests never fire them.
 
@@ -13,7 +14,6 @@ local hypr = here .. "/../../dot_config/hypr"
 package.path = hypr .. "/?.lua;" .. package.path
 
 package.loaded["autostart"] = true
-package.loaded["colors"] = dofile(hypr .. "/create_colors.lua")
 
 require("hyprland")
 
