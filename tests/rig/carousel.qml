@@ -7,11 +7,14 @@
 //   qs-run.sh ipc call carouselprobe get       -> open, screen, files, selection, palette state
 //   qs-run.sh ipc call carouselprobe parse     -> pure helpers on fixtures
 //   qs-run.sh ipc call carouselprobe windows   -> how many carousel windows exist
+//   qs-run.sh ipc call launcher toggle         (the production Launcher, for the one-overlay
+//                                               rule; start it with fake XDG_DATA_DIRS only)
 import QtQuick
 import Quickshell
 import Quickshell.Io
 import qs
 import qs.bar
+import qs.launcher
 import qs.rail
 import qs.services
 import qs.wallpaper
@@ -55,6 +58,10 @@ ShellRoot {
         id: carousel
     }
 
+    Launcher {
+        id: launcher
+    }
+
     function findAll(item, pred, out) {
         if (!item)
             return out;
@@ -82,6 +89,10 @@ ShellRoot {
                 deriving: carousel.deriving,
                 pending: carousel.pending,
                 applying: carousel.applying,
+                applyOwned: carousel.applyOwned,
+                grab: carousel.grab,
+                launcherOpen: launcher.opened,
+                overlay: Overlays.active,
                 applyQueued: carousel.applyQueued,
                 settling: carousel.settling !== null,
                 // Each screen's Wallpaper: what it shows and whether it decoded.

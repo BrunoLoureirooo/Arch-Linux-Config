@@ -7,7 +7,8 @@
 #       reused, --restage wipes it first so create_ files are reseeded), then start
 #       `qs -p <staged>/.config/quickshell` in the background with HOME=<staged>,
 #       XDG_{CONFIG,DATA,STATE,CACHE}_HOME inside it, RICE_NO_RELOAD=1 and
-#       <staged>/.local/bin first on PATH. Prints the staged HOME.
+#       <staged>/.local/bin first on PATH (QS_RUN_BARE_PATH=1: no ~/.local/bin on PATH
+#       at all, staged or real, as in the real session). Prints the staged HOME.
 #       --entry runs a test config instead of shell.qml: the file is copied into the
 #       staged config dir as rig-<name>.qml, so `import qs` / `import qs.components`
 #       resolve against the staged shell exactly as production files do.
@@ -102,10 +103,16 @@ cmd_start() {
     (
         # shellcheck source=tests/rig/rig_env.sh
         source "$R/rig_env.sh"
+        local qpath="$STAGED/.local/bin:$PATH"
+        if [[ -n "${QS_RUN_BARE_PATH:-}" ]]; then
+            # Like the real session (greetd -> start-hyprland): no ~/.local/bin on PATH,
+            # neither the staged one nor the real one.
+            qpath=$(tr ':' '\n' <<<"$PATH" | grep -vxF -e "$STAGED/.local/bin" -e "$HOME/.local/bin" | paste -sd:)
+        fi
         export RICE_QS_RUN_ID="$id" RICE_NO_RELOAD=1 HOME="$STAGED" \
             XDG_CONFIG_HOME="$STAGED/.config" XDG_DATA_HOME="$STAGED/.local/share" \
             XDG_STATE_HOME="$STAGED/.local/state" XDG_CACHE_HOME="$STAGED/.cache" \
-            PATH="$STAGED/.local/bin:$PATH" DBUS_SESSION_BUS_ADDRESS="$bus"
+            PATH="$qpath" DBUS_SESSION_BUS_ADDRESS="$bus"
         cd "$STAGED"
         exec qs -p "$target" --no-color
     ) >"$OUT" 2>&1 </dev/null &

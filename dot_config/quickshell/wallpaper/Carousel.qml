@@ -14,6 +14,15 @@
 // remembered and applies once the palette arrives (a move or a failure drops it).
 // After a successful apply the preview stays until Theme and WallpaperState have re-read
 // the new files (or 3 s pass), so the shell never flashes the old palette.
+// Escape (or the toggle) closes even while an apply runs: the apply finishes in the
+// background (never killed half-way), its preview stays until it lands, and a failure
+// then drops the preview. An apply with no result within applyTimeout (15 s) is no
+// longer waited for: `✗ apply timed out`, the keyboard grab is released, the preview
+// stays until the carousel is closed (the process itself is still not killed).
+// The CLI runs by absolute path ($HOME/.local/bin/rice-palette): the session's PATH
+// (greetd -> start-hyprland, no login shell) has no ~/.local/bin.
+// Only one keyboard-grabbing overlay at a time (Overlays): the launcher opening closes
+// the carousel and the other way round.
 import QtQuick
 import QtQuick.Shapes
 import Qt.labs.folderlistmodel
@@ -34,13 +43,17 @@ Scope {
     readonly property LazyLoader windowLoader: loader
     readonly property string home: Quickshell.env("HOME") ?? ""
     readonly property string folder: home + "/Pictures/wallpapers"
+    readonly property string cli: home + "/.local/bin/rice-palette"
+    property int applyTimeout: 15000
 
     property var targetScreen: null
     property string wanted: ""        // the selected path while open
     property var results: ({})        // path -> {ok, tokens, dims, error}; reset on open
     property string pending: ""       // queued derivation (latest selection only)
     property bool deriving: false     // a `rice-palette derive` is running
-    property bool applying: false
+    property bool applying: false     // a `rice-palette apply` is running
+    property bool applyOwned: false   // ...and the carousel still waits for its result
+    property bool grab: true          // the window holds the Exclusive keyboard grab
     property bool applyQueued: false  // Enter came before the selection's palette
     property string applyError: ""
     property var settling: null       // {tokens, path} after an apply, until the files are re-read
@@ -49,6 +62,14 @@ Scope {
         if (loader.active)
             return;
         finishSettle();
+        if (applying && applyOwned) {
+            // A background apply from the last session: stop waiting for it (its files
+            // still arrive through the watches) and drop the preview it kept.
+            applyOwned = false;
+            applyTimer.stop();
+            Theme.clearPreview();
+            WallpaperState.clearPreview();
+        }
         const mon = Hyprland.focusedMonitor;
         targetScreen = Quickshell.screens.find(s => mon && s.name === mon.name) ?? Screens.mainScreen;
         results = ({});
@@ -56,14 +77,20 @@ Scope {
         pending = "";
         applyQueued = false;
         applyError = "";
+        grab = true;
+        Overlays.claim("carousel");  // closes the launcher if it is open
         loader.active = true;
     }
 
+    // Escape / toggle: drop the preview and close; while an owned apply runs, close only
+    // (the apply lands in the background and settles or drops the preview itself).
     function cancel() {
-        if (!loader.active || applying)
+        if (!loader.active)
             return;
-        Theme.clearPreview();
-        WallpaperState.clearPreview();
+        if (!(applying && applyOwned)) {
+            Theme.clearPreview();
+            WallpaperState.clearPreview();
+        }
         close();
     }
 
@@ -72,6 +99,16 @@ Scope {
         wanted = "";
         pending = "";
         applyQueued = false;
+        Overlays.release("carousel");
+    }
+
+    // The launcher opened: give way.
+    Connections {
+        target: Overlays
+        function onActiveChanged() {
+            if (Overlays.active !== "carousel" && loader.active)
+                root.cancel();
+        }
     }
 
     function toggle() {
@@ -181,21 +218,57 @@ Scope {
         if (!r.ok)
             return;
         applying = true;
+        applyOwned = true;
         applyError = "";
         applyProc.target = wanted;
+        applyProc.tokens = r.tokens;
         applyProc.done = 0;
         applyProc.running = true;
+        applyTimer.restart();
+    }
+
+    // No result within applyTimeout: stop waiting (the process keeps running).
+    function applyTimedOut() {
+        if (!applying || !applyOwned)
+            return;
+        applyOwned = false;
+        console.warn("Carousel: apply of", applyProc.target, "gave no result within", applyTimeout, "ms; no longer waiting");
+        if (loader.active) {
+            applyError = "timed out";
+            grab = false;
+        } else {
+            Theme.clearPreview();
+            WallpaperState.clearPreview();
+        }
     }
 
     function applied() {
+        const owned = applyOwned;
         applying = false;
+        applyOwned = false;
+        applyTimer.stop();
         const p = applyProc.target;
-        if (applyProc.code !== 0) {
-            applyError = oneLine(applyProc.stderr.text) || "rice-palette exited " + applyProc.code;
-            console.warn("Carousel: apply failed for", p + ":", applyError);
-            return;  // stay open with the preview
+        const ok = applyProc.code === 0;
+        if (!owned) {
+            // Late (timed out, or the carousel was reopened): the files, if written,
+            // reach Theme through its watch; only the wallpaper state is re-read.
+            console.info("Carousel: late apply of", p, ok ? "finished" : "failed (exit " + applyProc.code + ")");
+            if (ok)
+                WallpaperState.reload();
+            return;
         }
-        settling = { tokens: results[p].tokens, path: p };
+        if (!ok) {
+            const err = oneLine(applyProc.stderr.text) || "rice-palette exited " + applyProc.code;
+            console.warn("Carousel: apply failed for", p + ":", err);
+            if (loader.active) {
+                applyError = err;
+                return;  // stay open with the preview
+            }
+            Theme.clearPreview();  // closed during the apply: nothing to keep
+            WallpaperState.clearPreview();
+            return;
+        }
+        settling = { tokens: applyProc.tokens, path: p };
         WallpaperState.reload();
         close();
         settleTimer.restart();
@@ -238,7 +311,7 @@ Scope {
         property int done: 0
         onDoneChanged: if (done === 3) root.derived()
 
-        command: ["sh", "-c", "printf 'file:%s\\n' \"$(file -b -- \"$1\" 2>/dev/null | head -n 1)\"; exec rice-palette derive \"$1\"", "sh", target]
+        command: ["sh", "-c", "printf 'file:%s\\n' \"$(file -b -- \"$1\" 2>/dev/null | head -n 1)\"; exec \"$2\" derive \"$1\"", "sh", target, root.cli]
         stdout: StdioCollector { onStreamFinished: derive.done++ }
         stderr: StdioCollector { onStreamFinished: derive.done++ }
         onExited: (exitCode, exitStatus) => {
@@ -251,11 +324,12 @@ Scope {
         id: applyProc
 
         property string target: ""
+        property var tokens: null
         property int code: 0
         property int done: 0
         onDoneChanged: if (done === 2) root.applied()
 
-        command: ["rice-palette", "apply", target]
+        command: [root.cli, "apply", target]
         stderr: StdioCollector { onStreamFinished: applyProc.done++ }
         onExited: (exitCode, exitStatus) => {
             code = exitCode;
@@ -272,6 +346,11 @@ Scope {
         target: WallpaperState
         enabled: root.settling !== null
         function onFilePathChanged() { root.settleCheck(); }
+    }
+    Timer {
+        id: applyTimer
+        interval: root.applyTimeout
+        onTriggered: root.applyTimedOut()
     }
     Timer {
         id: settleTimer
@@ -367,7 +446,7 @@ Scope {
             implicitHeight: card.height + margin
             color: "transparent"
             WlrLayershell.layer: WlrLayer.Overlay
-            WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+            WlrLayershell.keyboardFocus: root.grab ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
             WlrLayershell.namespace: "rice-carousel"
 
             readonly property int margin: Math.round(e * 0.45)
@@ -455,6 +534,10 @@ Scope {
                                 const dot = name.lastIndexOf(".");
                                 if (dot > 0)
                                     parts.push(name.slice(dot + 1).toLowerCase());
+                                if (!root.grab) {  // timed out: the keys no longer reach it
+                                    parts.push("ctrl+alt+w close");
+                                    return parts.join(" · ");
+                                }
                                 if (win.count > 1)
                                     parts.push("←/→ select");
                                 if (!win.result || win.result.ok)
@@ -462,6 +545,7 @@ Scope {
                                 parts.push("esc cancel");
                                 return parts.join(" · ");
                             }
+                            textFormat: Text.PlainText  // holds the file's extension
                             color: Theme.dim
                             font.family: Theme.font
                             font.pixelSize: win.e
@@ -636,7 +720,8 @@ Scope {
                             width: Math.min(implicitWidth, parent.width - ticks.width - win.e)
                             clip: true
 
-                            readonly property string error: root.applyError !== "" ? "apply failed: " + root.applyError
+                            readonly property string error: root.applyError === "timed out" ? "apply timed out"
+                                : root.applyError !== "" ? "apply failed: " + root.applyError
                                 : win.result && !win.result.ok ? win.result.error : ""
 
                             Text {

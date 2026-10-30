@@ -31,11 +31,22 @@ Scope {
             return;
         const mon = Hyprland.focusedMonitor;
         targetScreen = Quickshell.screens.find(s => mon && s.name === mon.name) ?? Screens.mainScreen;
+        Overlays.claim("launcher");  // closes the carousel if it is open
         loader.active = true;
     }
 
     function close() {
         loader.active = false;
+        Overlays.release("launcher");
+    }
+
+    // Another overlay (the carousel) opened: give way.
+    Connections {
+        target: Overlays
+        function onActiveChanged() {
+            if (Overlays.active !== "launcher" && loader.active)
+                root.close();
+        }
     }
 
     function toggle() {

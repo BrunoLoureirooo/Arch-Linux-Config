@@ -1028,8 +1028,18 @@ tree_sums() { (cd "$staged" && find . -path ./.cache -prune -o -path ./.chezmoi-
 
 "$R/run.sh" wtype -s 900000 >/dev/null 2>&1 &
 holder_pid=$!
-"$R/qs-run.sh" start --entry "$R/carousel.qml" >/dev/null
+# The real session's PATH has no ~/.local/bin (greetd -> start-hyprland, no login shell):
+# the carousel must find rice-palette by its absolute path. QS_RUN_BARE_PATH=1 strips the
+# staged and the real ~/.local/bin; every derive and apply below runs that way. The fake
+# desktop entries of section 8 serve the launcher in carousel.qml (never real apps).
+cstart() { QS_RUN_BARE_PATH=1 XDG_DATA_DIRS="$apps" "$R/qs-run.sh" start --entry "$R/carousel.qml" >/dev/null; }
+cstart
 sleep 1
+qpid=$("$R/qs-run.sh" status | sed -n 's/.* pid=\([0-9]*\) .*/\1/p')
+qpath=$(tr '\0' '\n' <"/proc/$qpid/environ" | sed -n 's/^PATH=//p')
+[[ -n "$qpath" && "$qpath" != *"/.local/bin"* ]] && ! PATH="$qpath" command -v rice-palette >/dev/null \
+    && pass "carousel qs runs with no ~/.local/bin on PATH (rice-palette not resolvable by name)" \
+    || fail "carousel PATH still finds rice-palette: $qpath"
 cbus=$("$R/qs-run.sh" status | sed -n 's/.* bus=\([^ ]*\).*/\1/p')
 cj() { "$R/qs-run.sh" ipc call carouselprobe get | spy "$1"; }
 K() { "$R/keys.sh" "$@"; sleep 0.3; }
@@ -1164,7 +1174,7 @@ ndec=$(warns_since "$n0" | grep -c 'Carousel.qml.*Error decoding' || true)
 
 # f. Restart: the choice persists.
 "$R/qs-run.sh" stop >/dev/null
-"$R/qs-run.sh" start --entry "$R/carousel.qml" >/dev/null
+cstart
 sleep 2
 n0=$(logn)
 [[ "$(cj "(d['theme']['a1'], d['wallFile'].endswith('/ember.png'), [w['shown'].endswith('/ember.png') and w['ready'] for w in d['walls']])")" \
@@ -1268,6 +1278,121 @@ bad=$(warns_since "$n0" | grep -v -E 'QML Image at @wallpaper/Carousel.qml.*Erro
 ndec=$(warns_since "$n0" | grep -c 'Carousel.qml.*Error decoding' || true)
 [[ -z "$bad" && "$ndec" == 4 ]] && pass "qs log: only $ndec thumbnail decode warning(s) for the broken files in section 9" \
     || { fail "qs log section 9 ($ndec decode warnings)"; echo "$bad"; }
+
+# i. Escape while an apply runs: a slow rice-palette (a wrapper around the staged CLI that
+#    sleeps before `apply`; test only, the production carousel just runs the file). The
+#    carousel closes at once, the kitty gets the keys, the apply is not killed: it lands
+#    in the background and the shell settles on it.
+rm -f "$wp"/*
+cp "$staged/Pictures/aside/ember.png" "$staged/Pictures/aside/moss.png" "$staged/Pictures/aside/Tide.PNG" "$wp/"
+cli="$staged/.local/bin/rice-palette"
+mv -f "$cli" "$cli.real"
+printf '%s\n' '#!/bin/sh' \
+    "[ \"\$1\" = apply ] && { touch '$tmp/c9/apply-started'; sleep \"\$(cat '$tmp/c9/apply-delay')\"; }" \
+    "exec '$cli.real' \"\$@\"" >"$cli"
+chmod +x "$cli"
+echo 4 >"$tmp/c9/apply-delay"
+n0=$(logn)
+# A fresh recording kitty: the first one was started on the bus of the qs that f
+# restarted (qs-run.sh stopped that bus with it).
+kill -TERM "$kitty_pid" 2>/dev/null || true
+wait "$kitty_pid" 2>/dev/null || true
+cbus=$("$R/qs-run.sh" status | sed -n 's/.* bus=\([^ ]*\).*/\1/p')
+H dispatch 'hl.dsp.focus({ monitor = "DP-1" })' >/dev/null
+: >"$typed"
+"$R/run.sh" env HOME="$staged" XDG_CONFIG_HOME="$staged/.config" XDG_CACHE_HOME="$staged/.cache" \
+    XDG_STATE_HOME="$staged/.local/state" XDG_DATA_HOME="$staged/.local/share" \
+    DBUS_SESSION_BUS_ADDRESS="$cbus" kitty --config=NONE --title rig-kitty9i sh -c "cat >>'$typed'" \
+    >"$tmp/kitty9i.out" 2>&1 </dev/null &
+kitty_pid=$!
+for _ in $(seq 30); do sleep 0.3; [[ "$(H activewindow -j | spy "d.get('title')")" == rig-kitty9i ]] && break; done
+K z -k Return
+[[ "$(tr '\n' ' ' <"$typed")" == "z " ]] && pass "before i: the kitty on DP-1 has the keyboard" \
+    || fail "before i: kitty got '$(cat "$typed")' (active: $(H activewindow -j | spy "d.get('title')"))"
+: >"$typed"
+ctoggle
+settled || fail "slow apply: derivation did not finish"
+K -k Right
+settled || fail "slow apply: Right did not settle"
+sel_i=$(cj "d['selName']")
+rm -f "$tmp/c9/apply-started"
+K -k Return
+for _ in $(seq 20); do [[ -e "$tmp/c9/apply-started" ]] && break; sleep 0.1; done
+K -k Escape
+during=$(cj "(d['open'], d['applying'], d['previewing'], d['overlay'])")
+K d -k Return
+[[ "$sel_i" == Tide.PNG && "$during" == "(False, True, True, '')" && -z "$(layer_xywh rice-carousel)" && "$(tr '\n' ' ' <"$typed")" == "d " ]] \
+    && pass "Escape during a running apply: closed at once (no surface), apply still running, the kitty gets the keys" \
+    || fail "Escape during apply: sel $sel_i, (open, applying, previewing, overlay) $during, kitty got '$(cat "$typed")'"
+settled || fail "background apply did not settle"
+[[ "$(spy "d['path']" <"$staged/.local/state/quickshell/wallpaper.json")" == "$wp/Tide.PNG" \
+    && "$(cj "(d['open'], d['previewing'], d['theme']['a1'], d['wallFile'].endswith('/Tide.PNG'))")" == "(False, False, '$a1_tide', True)" ]] \
+    && pass "the background apply landed: Tide.PNG written, the shell reads it from the files, no preview left" \
+    || fail "background apply: $(cat "$staged/.local/state/quickshell/wallpaper.json"); $(cj d)"
+
+# j. An apply with no result within 15 s: the carousel stops waiting, shows
+#    '✗ apply timed out' and releases the keyboard grab; the apply is still not killed.
+echo 22 >"$tmp/c9/apply-delay"
+: >"$typed"
+ctoggle
+settled || fail "timeout: derivation did not finish"
+K -k Right
+settled || fail "timeout: Right did not settle"
+rm -f "$tmp/c9/apply-started"
+t0=$(date +%s)
+K -k Return
+for _ in $(seq 20); do [[ -e "$tmp/c9/apply-started" ]] && break; sleep 0.1; done
+sleep 3
+early=$(cj "(d['open'], d['applying'], d['grab'], d['texts'][-1])")
+K x -k Return
+early_typed=$(tr '\n' ' ' <"$typed")
+for _ in $(seq 150); do [[ "$(cj "d['grab']")" == False ]] && break; sleep 0.1; done
+t_out=$(( $(date +%s) - t0 ))
+late=$(cj "(d['open'], d['applying'], d['applyOwned'], d['grab'], d['texts'][-1], d['texts'][2].endswith(' · ctrl+alt+w close'))")
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-carousel-timeout-DP-1.png" >/dev/null
+K y -k Return
+[[ "$early" == "(True, True, True, 'PALETTE')" && -z "$early_typed" && $t_out -ge 14 && $t_out -le 17 \
+    && "$late" == "(True, True, False, False, '✗ apply timed out', True)" &&"$(tr '\n' ' ' <"$typed")" == "y " ]] \
+    && pass "slow apply: grab held at 3 s; after ${t_out} s '✗ apply timed out', header 'ctrl+alt+w close', grab released (the kitty gets the keys), apply still running" \
+    || fail "apply timeout: early $early (kitty '$early_typed'), after ${t_out} s $late, kitty got '$(cat "$typed")'"
+ctoggle
+[[ "$(cj "(d['open'], d['previewing'], d['applying'])")" == "(False, False, True)" ]] \
+    && pass "the toggle closes the timed-out carousel and drops its preview; the apply keeps running" \
+    || fail "close after timeout: $(cj d)"
+for _ in $(seq 150); do [[ "$(cj "d['applying']")" == False ]] && break; sleep 0.2; done
+sleep 1
+[[ "$(cj "d['applying']")" == False && "$(spy "d['path']" <"$staged/.local/state/quickshell/wallpaper.json")" == "$wp/ember.png" \
+    && "$(cj "(d['theme']['a1'], d['wallFile'].endswith('/ember.png'), d['previewing'])")" == "('$a1_ember', True, False)" ]] \
+    && pass "the late apply finished (never killed): ember written and read by the shell" \
+    || fail "late apply: $(cat "$staged/.local/state/quickshell/wallpaper.json"); $(cj d)"
+mv -f "$cli.real" "$cli"
+ntimeout=$(warns_since "$n0" | grep -c 'Carousel: apply of .*/ember\.png gave no result within 15000 ms' || true)
+bad=$(warns_since "$n0" | grep -v 'Carousel: apply of .*/ember\.png gave no result within 15000 ms' || true)
+[[ -z "$bad" && "$ntimeout" == 1 ]] && pass "qs log: one timeout warning, nothing else, for i/j" \
+    || { fail "qs log i/j ($ntimeout timeout warnings)"; echo "$bad"; }
+
+# k. One keyboard-grabbing overlay at a time: the launcher opening closes the carousel
+#    (dropping its preview) and the other way round.
+n0=$(logn)
+ctoggle
+settled || fail "overlays: derivation did not finish"
+K -k Right
+settled || true
+k1=$(cj "(d['open'], d['launcherOpen'], d['previewing'], d['overlay'])")
+"$R/qs-run.sh" ipc call launcher toggle; sleep 0.5
+k2=$(cj "(d['open'], d['launcherOpen'], d['previewing'], d['overlay'])")
+layers_n() { echo "$(H layers | grep -c 'namespace: rice-carousel' || true) $(H layers | grep -c 'namespace: rice-launcher' || true)"; }
+s2=$(layers_n)
+ctoggle
+k3=$(cj "(d['open'], d['launcherOpen'], d['overlay'])")
+s3=$(layers_n)
+K -k Escape
+k4=$(cj "(d['open'], d['launcherOpen'], d['overlay'])")
+[[ "$k1" == "(True, False, True, 'carousel')" && "$k2" == "(False, True, False, 'launcher')" && "$s2" == "0 1" \
+    && "$k3" == "(True, False, 'carousel')" && "$s3" == "1 0" && "$k4" == "(False, False, '')" ]] \
+    && pass "launcher over the carousel closes it (preview dropped), carousel over the launcher closes that: one surface each time" \
+    || fail "overlays: $k1 -> $k2 [$s2] -> $k3 [$s3] -> $k4"
+[[ -z "$(warns_since "$n0")" ]] && pass "qs log: no ERROR/WARN in k" || { fail "qs log k"; warns_since "$n0"; }
 kill -TERM "$kitty_pid" 2>/dev/null || true
 wait "$kitty_pid" 2>/dev/null || true
 kitty_pid=""
