@@ -1572,7 +1572,7 @@ sleep 1
 # g. The real writer: claude-limits-statusline feeds the widget through the atomic rename.
 n=$(date +%s)
 line=$(printf '{"rate_limits":{"five_hour":{"used_percentage":12.6,"resets_at":%s},"seven_day":{"used_percentage":77,"resets_at":%s}}}' \
-    $((n + 7260)) $((n + 400000)) | CLAUDE_LIMITS_CACHE="$lim" "$staged/.local/bin/claude-limits-statusline")
+    $((n + 7260)) $((n + 400000)) | HOME="$staged" CLAUDE_LIMITS_CACHE="$lim" "$staged/.local/bin/claude-limits-statusline")
 sleep 1
 [[ "$line" == "5h 13% · 7d 77%" && "$(wj "([r['texts'][1] for r in d['claude']['rows']], d['claude']['note'])")" == "(['13%', '77%'], '0s ago')" ]] \
     && pass "claude-limits-statusline output '$line' shows as 13% / 77%" || fail "statusline: '$line' $(wj "d['claude']")"
