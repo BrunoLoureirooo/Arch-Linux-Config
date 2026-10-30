@@ -315,16 +315,17 @@ Do these in order. Anything that fails: note it, and use section 13 if the deskt
    scroll with Left/Right (the wallpaper previews live), Enter applies (runs `rice-palette apply`,
    recolours kitty, Hyprland borders and the shell), Escape reverts. Or from a terminal:
    `rice-palette apply ~/Pictures/wallpapers/<image>`.
-   **Check that `rice-palette` is found from inside the shell.** The carousel runs a bare
-   `rice-palette` (`derive` while scrolling, `apply` on Enter), and `~/.local/bin` is only on PATH in
-   interactive shells (`.bashrc` returns early otherwise). Open the carousel, scroll, press Enter: if the
-   previews do not recolour, or Enter shows an error, PATH is the cause (known issue in section 12, fix
-   scheduled). Workarounds: start Hyprland from a login shell that has `~/.local/bin` on PATH, or put it
-   on PATH for everything Hyprland starts with a line next to the other `hl.env` lines in
-   `dot_config/hypr/hyprland.lua`, for example
-   `hl.env("PATH", "/home/vyrus-extreme/.local/bin:" .. (os.getenv("PATH") or "/usr/local/bin:/usr/bin"))`
-   (same `hl.env(name, value)` form as the existing lines; the PATH line itself is untested).
-   A symlink into `/usr/local/bin` is not recommended.
+   The carousel runs `$HOME/.local/bin/rice-palette` by its absolute path, because the session's PATH
+   has no `~/.local/bin`: read from the running Hyprland's `/proc/<pid>/environ` (session started by
+   greetd -> tuigreet -> `start-hyprland`, so `.bashrc` never runs) it is
+   `/usr/local/sbin:/usr/local/bin:/usr/bin:...:JetBrains/Toolbox/scripts`. The rig runs the whole
+   carousel test with that kind of PATH (no `~/.local/bin` at all). No PATH workaround is needed.
+   Escape works even while an apply runs (the apply finishes in the background and the colours land a
+   moment later). If an apply gives no result within 15 s the strip shows `✗ apply timed out` and gives
+   the keyboard back; close it with `Ctrl+Alt+W`. Applying with the lid closed must leave the panel
+   dark: `hyprctl monitors all` still lists eDP-1 as disabled afterwards (the apply recolours the
+   borders at runtime and never reloads the config).
+   The launcher and the carousel never stay open together: opening one closes the other.
 9. **Toasts replace mako.** `pgrep -x mako` must print nothing and the shell must own the notification
    name: `notify-send "test" "hello"` shows a cut-corner toast at the bottom-right of the main screen;
    a click dismisses it; at most three at once. The owner of the name must be the shell, not mako:
@@ -446,9 +447,14 @@ cp ~/Pictures/berserk-wallpaper.jpg ~/Pictures/wallpapers/
 `rice-palette apply <image>` runs `matugen` to extract the image's colours, derives the eight palette
 tokens (bg panel line dim fg a1 a2 warn) with contrast guarantees, writes `~/.config/quickshell/colors.json`,
 `~/.config/kitty/colors.conf`, `~/.config/hypr/colors.lua` and `~/.config/btop/themes/rice.theme`
-all-or-nothing, records the choice in `~/.local/state/quickshell/wallpaper.json`, then reloads kitty
-(SIGUSR1) and Hyprland (`hyprctl reload`). Set `RICE_NO_RELOAD=1` to skip the reloads. `~/.local/bin` is
-only on PATH in interactive shells, so use the full path from scripts. A grey or black wallpaper still
+all-or-nothing, records the choice in `~/.local/state/quickshell/wallpaper.json`, then recolours kitty
+(SIGUSR1) and the running Hyprland's borders (`hyprctl eval 'hl.config({ general = { col = ... } })'`;
+a failure, for example under the hyprlang rollback config, only prints a warning). It never runs
+`hyprctl reload`: a reload re-applies the monitor lines and would light the panel `lid close` disabled.
+`hyprland.lua` reads `colors.lua` with `loadfile`, not `require`, so rewriting it does not trigger
+Hyprland's autoreload either (it applies at the next login or reload); an unchanged `colors.lua` is not
+rewritten at all. Set `RICE_NO_RELOAD=1` to skip the live recolouring. `~/.local/bin` is only on PATH in
+interactive shells, so use the full path from scripts. A grey or black wallpaper still
 gets a chromatic palette from matugen (accepted). Prefer screen-sized images: an 8000x8000 PNG decodes
 fully (hundreds of MB, transient).
 
@@ -538,22 +544,10 @@ Measure on your machine first (section 5, item 13), then decide.
 Tags: `scheduled for fix` = in the controller's final fix wave; `accepted/known` = a decision or a
 trade-off, not planned to change. The controller revises this block after the fix wave.
 
-- **Quickshell 0.3.1 `SystemClock` and daylight-saving time. [scheduled for fix]** During the repeated
-  hour of the autumn clock change (2026-10-25 01:00-02:00 in Europe/Lisbon) `SystemClock` logged about
-  2,200 `QTimer::start: negative intervals aren't allowed` warnings per second, with qs at about 30 % CPU
-  (seen in the rig). It is used by `bar/Bar.qml` and `rail/ClockWidget.qml`. Scheduled to be replaced by one
-  shared timer-based clock. A full rerun after the repeated hour was clean.
-- **Carousel `apply` has no timeout. [scheduled for fix]** While `rice-palette apply` runs, the carousel
-  holds the exclusive keyboard grab and ignores Escape; a hung apply would lock the keyboard until qs is
-  killed (`qs-supervise` restarts it; from a TTY: `pkill -x qs`). Scheduled hardening: let Escape close
-  during an apply and/or add a timeout of about 10 s.
-- **Carousel calls a bare `rice-palette`. [scheduled for fix]** `wallpaper/Carousel.qml` runs
-  `rice-palette derive` and `rice-palette apply` by name, which only resolves if `~/.local/bin` is on the PATH
-  of the Hyprland session (`.bashrc` is not read by non-interactive shells). If not, live previews and Enter
-  fail. Scheduled fix: call `$HOME/.local/bin/rice-palette` by absolute path, as `autostart.lua` does.
-  Workaround until then: checklist item 8 in section 5.
-- **Test hygiene. [scheduled for fix]** `tests/rig/selftest-qs.sh` runs the real
-  `claude-limits-statusline` with the real `HOME`; to be prefixed with the staged HOME. Test-only.
+- **A timed-out carousel apply. [accepted/known]** After `✗ apply timed out` the strip stays visible
+  without the keyboard (close it with `Ctrl+Alt+W`); the apply process is never killed, and if it
+  finishes later its files still recolour the shell. While that late apply is still running, Enter in a
+  reopened carousel does nothing.
 - **Glitch effect dropped. [accepted/known]** The workspace-switch glitch was evaluated and dropped: idle
   CPU and frame timing were fine, but about +45 MB of memory stayed retained after it had played (562 to
   ~611 MB with it, 550 to ~555 MB without). The glitch toggle on the render page is a mock only. See
@@ -739,11 +733,11 @@ Nothing below was observed on your machine. "Rig" means the headless nested Hypr
 **Shell**
 - Everything on your real screens: scaling, 144 Hz, real GPU rendering, the rail font size against the render.
 - Taking `org.freedesktop.Notifications` on the live bus once mako is gone; real application notifications; launching real apps from the launcher (only fake `.desktop` entries were executed); a physical keyboard into the launcher (the rig needed a held virtual keyboard); the `Super+Space` bind end to end; the `Ctrl+Alt+W` bind opening the carousel.
-- Real `hyprctl reload` and kitty `SIGUSR1` after `rice-palette apply` (stubbed in the rig); the generated btop theme in btop on your real terminal (btop 1.4.7 was run in a pseudo-terminal with a temp HOME: `color_theme = "rice"` picks up a `rice.theme` rendered from the seed palette, and with the file missing btop starts on its built-in colours); the chezmoi-deployed layout of `~/.local/bin` finding `~/.local/share/rice`.
+- Kitty `SIGUSR1` after `rice-palette apply` (stubbed in every test); the border recolouring through `hyprctl eval` ran only against the nested rig (`tests/hypr/palette_lid.sh`), not your session; the generated btop theme in btop on your real terminal (btop 1.4.7 was run in a pseudo-terminal with a temp HOME: `color_theme = "rice"` picks up a `rice.theme` rendered from the seed palette, and with the file missing btop starts on its built-in colours); the chezmoi-deployed layout of `~/.local/bin` finding `~/.local/share/rice`.
 - Your actual wallpapers (JPEG/WebP size parsing is covered by fixtures only), the carousel under rapid scrolling, the startup wallpaper race (guarded but never reproduced).
 - Media players other than the one the rig could read; the rail with a 15 % battery row; real PipeWire volume changes; clicking a bar cell with a real pointer.
 - Real connected Bluetooth devices and their battery values (none were connected during the build); whether BlueZ reports a single AirPods level at all.
-- The carousel finding `rice-palette` on the Hyprland session's PATH (it runs a bare `rice-palette`; the PATH of a session started outside an interactive shell was not checked).
+- The carousel on your session: it runs `$HOME/.local/bin/rice-palette` by absolute path; the rig ran it with no `~/.local/bin` on PATH, which is what your session's PATH looks like (read from the live Hyprland process).
 - A real Claude Code session feeding the cache, and whether your plan reports `rate_limits`; the 30 s missing-file re-read of the Claude cache via the timer path (seen working once by hand).
 - Whether the glvnd NVIDIA EGL probe in qs wakes the dGPU.
 - Real `nvidia-smi` streaming (format, locale, first line within 6 s, death under `pdeathsig`), real VRAM numbers, the power/battery effect of the stream, that the card is `active` at login, hot reload while the stream runs; qs memory on the NVIDIA GL stack.

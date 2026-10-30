@@ -27,6 +27,15 @@
 > - **`lid` and `headless` scripts** are now in the repo (`dot_local/bin/executable_lid`, `executable_headless`) and
 >   ported to the Lua IPC (`hyprctl eval 'hl.monitor(...)'`, `hyprctl dispatch 'hl.dsp.dpms(...)'`) with the hyprlang
 >   form as a fallback; `headless` now darkens the displays before cutting the peripherals (section 10).
+> - **Palette apply (section 5.4)** never runs `hyprctl reload` (a reload re-applies the monitor lines and lights
+>   the panel `lid close` disabled): it recolours the running borders through `hyprctl eval 'hl.config(...)'`,
+>   and `hyprland.lua` reads `colors.lua` with `loadfile` (not `require`) so its rewrite does not trigger
+>   Hyprland's autoreload. The carousel runs `$HOME/.local/bin/rice-palette` by absolute path (the session's
+>   PATH has no `~/.local/bin`); Escape closes it even during an apply, an apply with no result in 15 s is no
+>   longer waited for, and the launcher and carousel close each other (`services/Overlays.qml`).
+> - **Clock:** one shared `services/Clock.qml` (JS `Date` on the 2 s Stats tick) replaces `SystemClock`, which in
+>   Quickshell 0.3.1 spun at ~30 % CPU during the repeated DST hour. Launcher entries with `Terminal=true` run in
+>   `kitty -e`. Window titles, MPRIS metadata and device names render as plain text.
 > - **`.chezmoiignore`** also lists `README.md` (the repo README is not deployed to `~/README.md`), `**/__pycache__` and `*.pyc`; the repo has a `.gitignore`.
 > - **Palette:** a grey or black wallpaper still gets a chromatic palette from matugen (the cyan/magenta
 >   fallback is not reached end to end); `rice-palette` writes its four files all-or-nothing with rollback.
