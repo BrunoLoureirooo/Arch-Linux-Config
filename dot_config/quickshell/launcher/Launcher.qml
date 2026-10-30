@@ -87,6 +87,18 @@ Scope {
         return "[" + (t + "  ").slice(0, 2) + "]";
     }
 
+    // Quickshell 0.3.1's execute() ignores Terminal=true, so a terminal app (btop, nvim,
+    // yazi, ...) would start with no tty: those run in a new kitty instead.
+    function launch(entry) {
+        if (entry.runInTerminal)
+            Quickshell.execDetached({
+                command: ["kitty", "-e"].concat(entry.command),
+                workingDirectory: entry.workingDirectory
+            });
+        else
+            entry.execute();
+    }
+
     IpcHandler {
         target: "launcher"
 
@@ -119,7 +131,7 @@ Scope {
                     return;
                 const entry = rows[selected];
                 root.close();
-                entry.execute();
+                root.launch(entry);
             }
 
             screen: root.targetScreen

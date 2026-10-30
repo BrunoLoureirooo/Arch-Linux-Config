@@ -821,6 +821,10 @@ mkdesk rig-beta "Rig Test Beta" "Beta Tool" "beta;" beta
 mkdesk firefox-fake "Firefox Fake" "Web Browser" "internet;" firefox
 mkdesk rig-hidden "Rig Hidden Entry" "Hidden" "" hidden "NoDisplay=true"
 for i in 01 02 03 04 05 06 07 08 09 10; do mkdesk "rig-many-$i" "Rig Many $i" "Filler" "" "many$i"; done
+# Terminal=true: the launcher must give it a terminal (kitty -e); the marker records
+# whether stdin was a tty.
+printf '[Desktop Entry]\nType=Application\nName=Term Fake\nTerminal=true\nExec=sh -c "if test -t 0; then echo tty > %s/term; else echo notty > %s/term; fi"\n' \
+    "$markers" "$markers" >"$apps/applications/term-fake.desktop"
 "$R/run.sh" wtype -s 900000 >/dev/null 2>&1 &
 holder_pid=$!
 XDG_DATA_DIRS="$apps" "$R/qs-run.sh" start --entry "$R/launcher.qml" >/dev/null
@@ -860,11 +864,11 @@ aw0=$(aw)
 [[ "$(lj "d['open'] or d['window']")" == False && -z "$(layer_xywh rice-launcher)" ]] \
     && pass "launcher closed: no window, no surface" || fail "launcher at start: $(lj d)"
 toggle
-fakes="['Firefox Fake', 'Rig Many 01', 'Rig Many 02', 'Rig Many 03', 'Rig Many 04', 'Rig Many 05', 'Rig Many 06', 'Rig Many 07', 'Rig Many 08', 'Rig Many 09', 'Rig Many 10', 'Rig Test Alpha', 'Rig Test Beta']"
+fakes="['Firefox Fake', 'Rig Many 01', 'Rig Many 02', 'Rig Many 03', 'Rig Many 04', 'Rig Many 05', 'Rig Many 06', 'Rig Many 07', 'Rig Many 08', 'Rig Many 09', 'Rig Many 10', 'Rig Test Alpha', 'Rig Test Beta', 'Term Fake']"
 [[ ! -e "$staged/.local/share/applications" && "$(lj "d['allNames']")" == "$fakes" \
-    && "$(lj "(d['count'], d['total'], len(d['rows']), d['inputFocus'], d['screen'])")" == "(13, 13, 8, True, 'DP-1')" \
+    && "$(lj "(d['count'], d['total'], len(d['rows']), d['inputFocus'], d['screen'])")" == "(14, 14, 8, True, 'DP-1')" \
     && "$(layer_xywh rice-launcher)" == "DP-1 0 0 1920 1080" ]] \
-    && pass "toggle opens on DP-1 (full-screen overlay); only the 13 fake entries, 8 rows shown, query focused" \
+    && pass "toggle opens on DP-1 (full-screen overlay); only the 14 fake entries, 8 rows shown, query focused" \
     || fail "launcher open: $(lj d) layer '$(layer_xywh rice-launcher)'"
 "$R/qs-run.sh" shot DP-1 "$SHOTS/qs-launcher-DP-1.png" >/dev/null
 [[ "$(lj "d['windowActive']")" == True && "$(aw)" == "$aw0" ]] \
@@ -903,7 +907,7 @@ K aa -k Return
     && pass "Escape closes; keys typed next reach the kitty ('$(typed)'), none typed while open did" \
     || fail "Escape: $(lj d), kitty got '$(typed)'"
 toggle
-[[ "$(lj "(d['query'], d['selected'], d['count'])")" == "('', 0, 13)" ]] \
+[[ "$(lj "(d['query'], d['selected'], d['count'])")" == "('', 0, 14)" ]] \
     && pass "reopening clears the query and the selection" || fail "reopen: $(lj d)"
 
 # e. Enter runs the selected entry (its Exec writes a marker) and closes.
@@ -959,6 +963,19 @@ toggle
     && pass "with eDP-1 focused it opens on eDP-1" || fail "focused screen: $(lj "d['screen']"), layer '$(layer_xywh rice-launcher)'"
 "$R/qs-run.sh" shot eDP-1 "$SHOTS/qs-launcher-eDP-1.png" >/dev/null
 K -k Escape
+
+# j. A Terminal=true entry runs inside a new kitty (Quickshell's execute() ignores
+#    Terminal=): its command sees a tty, and the kitty closes when the command ends.
+nk0=$(H clients -j | spy "len([c for c in d if c['class'] == 'kitty'])")
+toggle
+K term -k Return
+for _ in $(seq 50); do [[ -s "$markers/term" ]] && break; sleep 0.2; done
+sleep 1
+nk1=$(H clients -j | spy "len([c for c in d if c['class'] == 'kitty'])")
+[[ "$(cat "$markers/term" 2>/dev/null)" == tty && "$(lj "d['open']")" == False && "$nk1" == "$nk0" ]] \
+    && pass "Terminal=true entry ran in a kitty with a tty (marker 'tty'); that kitty closed again" \
+    || fail "terminal entry: marker '$(cat "$markers/term" 2>/dev/null)', open $(lj "d['open']"), kitty windows $nk0 -> $nk1"
+H dispatch 'hl.dsp.focus({ monitor = "DP-1" })' >/dev/null
 [[ -z "$(warns_since "$n0")" ]] && pass "qs log: no ERROR/WARN in section 8" || { fail "qs log section 8"; warns_since "$n0"; }
 kill -TERM "$kitty_pid" 2>/dev/null || true
 wait "$kitty_pid" 2>/dev/null || true
