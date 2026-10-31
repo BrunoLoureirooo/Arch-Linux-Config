@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+"""rice-palette: derive a neon palette from a wallpaper and write the desktop's colour files.
+
+  rice-palette derive <image>   print the eight tokens as JSON (cached by file hash)
+  rice-palette apply  <image>   derive, write the colour files, recolour kitty and the
+                                Hyprland borders of the running session (no config reload)
+
+Set RICE_NO_RELOAD (any non-empty value) to skip the live recolouring, RICE_MATUGEN to
+pick the matugen binary.
+"""
+import hashlib
+import json
+import os
+import re
+import resource
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "share" / "rice"))
+
+from outputs import (hypr_border_lua, render_btop, render_hypr, render_kitty,  # noqa: E402
+                     render_quickshell, roles_from_matugen)
+from palette import derive_palette  # noqa: E402
+
+TOKENS = ("bg", "panel", "line", "dim", "fg", "a1", "a2", "warn")
+HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
+MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a")
+MATUGEN_TIMEOUT = 60
+MATUGEN_MEM = 4 << 30  # address-space cap so a huge image fails instead of eating the box
+
+
+class Fail(Exception):
+    pass
+
+
+def is_image(path):
+    if shutil.which("file"):
+        r = subprocess.run(["file", "--mime-type", "-b", str(path)], capture_output=True, text=True)
+        if r.returncode == 0:
+            return r.stdout.strip().startswith("image/")
+    with open(path, "rb") as f:
+        head = f.read(12)
+    return head.startswith(MAGIC) or (head[:4] == b"RIFF" and head[8:12] == b"WEBP")
+
+
+def check_image(arg):
+    path = Path(arg)
+    if not path.exists():
+        raise Fail(f"no such file: {arg}")
+    if not path.is_file():
+        raise Fail(f"not a regular file: {arg}")
+    h = hashlib.sha1()
+    try:
+        with open(path, "rb") as f:
+            while chunk := f.read(1 << 20):
+                h.update(chunk)
+        empty = path.stat().st_size == 0
+        image = not empty and is_image(path)
+    except OSError as e:
+        raise Fail(f"cannot read {arg}: {e.strerror}")
+    if not image:
+        raise Fail(f"not an image: {arg}")
+    return path.resolve(), h.hexdigest()
+
+
+def run_matugen(path):
+    exe = os.environ.get("RICE_MATUGEN") or "matugen"
+    cmd = [exe, "image", str(path), "--json", "hex", "--dry-run", "-m", "dark",
+           "-t", "scheme-vibrant", "--source-color-index", "0", "-q"]
+
+    def limit():
+        resource.setrlimit(resource.RLIMIT_AS, (MATUGEN_MEM, MATUGEN_MEM))
+
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=MATUGEN_TIMEOUT,
+                           stdin=subprocess.DEVNULL, preexec_fn=limit)
+    except FileNotFoundError:
+        raise Fail(f"matugen not found ({exe})")
+    except subprocess.TimeoutExpired:
+        raise Fail("matugen timed out")
+    except (OSError, subprocess.SubprocessError) as e:
+        raise Fail(f"cannot run matugen ({exe}): {e}")
+    if r.returncode != 0:
+        err = r.stderr.decode("utf-8", "replace").strip().splitlines()
+        raise Fail("matugen failed: " + (err or ["no output"])[-1])
+    try:
+        return roles_from_matugen(json.loads(r.stdout.decode("utf-8")))
+    except (ValueError, RecursionError) as e:
+        raise Fail(f"unusable matugen output: {e}")
+
+
+def derive(arg):
+    path, digest = check_image(arg)
+    home = Path.home()
+    cache = home / ".cache" / "rice" / f"{digest}.json"
+    try:
+        tokens = json.loads(cache.read_text())
+        if (isinstance(tokens, dict) and set(tokens) == set(TOKENS)
+                and all(isinstance(v, str) and HEX.match(v) for v in tokens.values())):
+            return path, tokens
+    except (OSError, ValueError):
+        pass  # missing or corrupt cache: recompute
+    try:
+        tokens = derive_palette(run_matugen(path))
+    except ValueError as e:
+        raise Fail(f"cannot derive palette: {e}")
+    try:
+        write_atomic_all({cache: json.dumps(tokens)})
+    except OSError:
+        pass  # the cache is an optimisation only
+    return path, tokens
+
+
+def write_atomic_all(files):
+    """Write every file to a temp name, then rename them all into place.
+
+    If any rename fails, files already replaced are restored from a snapshot and newly
+    created ones are removed, so a failure leaves every target as it was.
+    """
+    temps = []
+    done = []  # (target, previous bytes or None if it did not exist)
+    try:
+        for target, text in files.items():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_name(f".{target.name}.tmp{os.getpid()}")
+            temps.append(tmp)
+            tmp.write_text(text)
+        previous = {t: (t.read_bytes() if t.is_file() else None) for t in files}
+        for tmp, target in zip(temps, files):
+            os.replace(tmp, target)
+            done.append(target)
+    except BaseException:
+        for target in done:
+            old = previous[target]
+            if old is None:
+                target.unlink(missing_ok=True)
+            else:
+                target.write_bytes(old)
+        raise
+    finally:
+        for tmp in temps:
+            tmp.unlink(missing_ok=True)
+
+
+def reload(tokens):
+    """Recolour the running desktop: kitty re-reads its config on SIGUSR1; Hyprland gets
+    only the border colours through `hyprctl eval`. Never `hyprctl reload`: it re-runs
+    hyprland.lua, whose monitor line re-enables the panel `lid close` disabled.
+
+    pkill and hyprctl are resolved through PATH on purpose: the tests put stubs first
+    on PATH. A hardened absolute path would make `unittest discover` SIGUSR1 the
+    owner's real kitty and reach the real Hyprland.
+    """
+    cmds = (["pkill", "-USR1", "-x", "kitty"], ["hyprctl", "eval", hypr_border_lua(tokens)])
+    for cmd in cmds:
+        what = " ".join(cmd[:2])
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            print(f"warning: {what} failed: {e}", file=sys.stderr)
+            continue
+        if cmd[0] == "pkill":
+            continue  # exits 1 when no kitty is running; that is not a problem
+        # hyprctl exits 0 even when it refuses (a hyprlang session answers eval with an
+        # error text): only the literal "ok" reply is success. A failure only warns; the
+        # new colors.lua applies at the next login either way.
+        reply = r.stdout.strip()
+        if r.returncode != 0 or reply != "ok":
+            detail = (reply or r.stderr.strip() or f"exit {r.returncode}").splitlines()[0]
+            print(f"warning: {what}: border colours not applied: {detail}", file=sys.stderr)
+
+
+def apply(arg):
+    path, tokens = derive(arg)
+    home = Path.home()
+    files = {
+        home / ".config/quickshell/colors.json": render_quickshell(tokens),
+        home / ".config/kitty/colors.conf": render_kitty(tokens),
+        home / ".config/hypr/colors.lua": render_hypr(tokens),
+        home / ".config/btop/themes/rice.theme": render_btop(tokens),
+        home / ".local/state/quickshell/wallpaper.json":
+            json.dumps({"path": str(path), "palette": path.stem}) + "\n",
+    }
+    # colors.lua is read by hyprland.lua through loadfile, which the autoreload does not
+    # watch (that, not this skip, is what keeps a write from reloading Hyprland); skip
+    # the write when nothing changed anyway.
+    lua = home / ".config/hypr/colors.lua"
+    try:
+        if lua.read_text() == files[lua]:
+            del files[lua]
+    except (OSError, UnicodeDecodeError):
+        pass
+    try:
+        write_atomic_all(files)
+    except OSError as e:
+        raise Fail(f"cannot write {e.filename or 'output files'}: {e.strerror}")
+    if not os.environ.get("RICE_NO_RELOAD"):
+        reload(tokens)
+
+
+def main(argv):
+    if len(argv) != 3 or argv[1] not in ("derive", "apply"):
+        print("usage: rice-palette derive|apply <image>", file=sys.stderr)
+        return 2
+    try:
+        if argv[1] == "derive":
+            print(json.dumps(derive(argv[2])[1], indent=2))
+        else:
+            apply(argv[2])
+    except Fail as e:
+        print(f"rice-palette: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:  # last resort: never show a traceback
+        print(f"rice-palette: unexpected {type(e).__name__}: {e}".replace("\n", " "),
+              file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
