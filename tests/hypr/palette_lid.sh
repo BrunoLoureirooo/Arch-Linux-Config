@@ -8,8 +8,9 @@
 # Hyprland's own autoreload watches exactly the files of the real layout. Then, with
 # eDP-1 disabled as `lid close` does:
 #   1. rice-palette apply (HOME = that temp HOME; a FAKE pkill first on PATH, so no
-#      real kitty is signalled; hyprctl reaches only the nested instance) rewrites
-#      colors.lua with a new palette and recolours the borders at runtime;
+#      real kitty is signalled; a logging hyprctl shim that execs the real hyprctl,
+#      which reaches only the nested instance) rewrites colors.lua with a new palette
+#      and recolours the borders at runtime;
 #   2. eDP-1 stays disabled (no `hyprctl reload`, and writing colors.lua does not
 #      trigger the autoreload);
 #   3. the border options hold the new palette; an explicit reload (what `lid open`
@@ -32,7 +33,9 @@ echo '-- palette_lid.sh stub: nothing is autostarted in the rig' >"$cfg/autostar
 cp "$REPO/dot_local/bin/executable_rice-palette" "$home/.local/bin/rice-palette"
 cp -r "$REPO/dot_local/share/rice" "$home/.local/share/rice"
 printf '#!/bin/sh\necho "pkill $*" >>%s/pkill.log\nexit 1\n' "$tmp" >"$tmp/stubs/pkill"
-chmod +x "$tmp/stubs/pkill" "$home/.local/bin/rice-palette"
+real_hyprctl=$(command -v hyprctl)
+printf '#!/bin/sh\necho "hyprctl $*" >>%s/hyprctl.log\nexec %s "$@"\n' "$tmp" "$real_hyprctl" >"$tmp/stubs/hyprctl"
+chmod +x "$tmp/stubs/pkill" "$tmp/stubs/hyprctl" "$home/.local/bin/rice-palette"
 
 "$R/nested-hypr.sh" stop >/dev/null 2>&1 || true
 "$R/nested-hypr.sh" start "$home/.config" >/dev/null
@@ -74,7 +77,12 @@ a1=$(python3 -I -c 'import json,sys; t=json.load(open(sys.argv[1])); print(" ".j
 read -r ca1 ca2 cline <<<"$a1"
 want="gradient data: $ca1 $ca2 45deg / gradient data: $cline 0deg"
 expect "running borders recoloured to the new palette" "$want" "$(border)"
-grep -q 'reload' "$tmp/pkill.log" && { echo "FAIL a reload was attempted"; fails=$((fails + 1)); } || true
+# The shim logged every hyprctl call of the apply: it must have recoloured (eval) and
+# must not have reloaded.
+grep -q '^hyprctl eval ' "$tmp/hyprctl.log" 2>/dev/null && echo "PASS the apply's hyprctl calls went through the logging shim (eval seen)" \
+    || { echo "FAIL no hyprctl eval logged by the shim: '$(cat "$tmp/hyprctl.log" 2>/dev/null)'"; fails=$((fails + 1)); }
+grep -qE '^hyprctl (.* )?reload( |$)' "$tmp/hyprctl.log" 2>/dev/null && { echo "FAIL a reload was attempted: $(grep reload "$tmp/hyprctl.log")"; fails=$((fails + 1)); } \
+    || echo "PASS no hyprctl reload during the apply"
 
 H reload >/dev/null; sleep 1
 expect "explicit reload (lid open) re-enables eDP-1" "DP-1:0 eDP-1:0" "$(state)"

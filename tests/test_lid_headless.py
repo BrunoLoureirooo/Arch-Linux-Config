@@ -187,6 +187,8 @@ class HeadlessTest(RigTest):
         r.flag("sudo-fails")
         res = r.run(HEADLESS)
         self.assertEqual(res.returncode, 0, res.stderr)
+        # The displays still went dark first and the peripheral cut was attempted once.
+        self.assertEqual(r.calls(), [self.OFF_LUA, f"sudo -n {PERIPH} off"])
 
     def test_second_press_within_two_seconds_is_ignored(self):
         r = self.rig(mode="lua", dpms="true")
