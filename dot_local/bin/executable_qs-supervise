@@ -50,6 +50,8 @@ while :; do
     echo "qs-supervise: qs exited (status $status) after ${ran} s, restarting in $delay s" >&2
     sleep "$delay" &
     child=$!
+    # Same window as above: a stop signal before `child=` would leave the sleep running.
+    ((stopping)) && kill -TERM "$child" 2>/dev/null
     wait "$child"
     child=""
     ((stopping)) && exit 0

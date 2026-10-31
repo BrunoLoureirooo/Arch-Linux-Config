@@ -21,6 +21,7 @@ FAKE_QS = r"""#!/bin/bash
 n=$(( $(cat "$FAKE_DIR/count" 2>/dev/null || echo 0) + 1 ))
 echo "$n" > "$FAKE_DIR/count"
 echo "$n $EPOCHREALTIME" >> "$FAKE_DIR/starts"
+echo "$$" > "$FAKE_DIR/qs.pid"
 what=$(sed -n "${n}p" "$FAKE_DIR/plan" 2>/dev/null)
 [ -z "$what" ] && what=fail
 [ "$what" = fail ] && exit 1
@@ -28,9 +29,25 @@ sleep "$what"
 exit 1
 """
 
+# Stands in for the back-off `sleep`: records its PID, asks the supervisor to stop
+# (SIGTERM to its parent) the moment it starts, then sleeps for real.
+FAKE_SLEEP = r"""#!/bin/bash
+echo "$$" > "$FAKE_DIR/sleep.pid"
+kill -TERM "$PPID"
+exec /usr/bin/sleep 30
+"""
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
 
 class Supervisor:
-    def __init__(self, plan, sig=None):
+    def __init__(self, plan, sig=None, stop_in_backoff=False):
         self.tmp = Path(tempfile.mkdtemp(prefix="qssup-"))
         self.bin = self.tmp / "bin"
         self.bin.mkdir()
@@ -39,6 +56,10 @@ class Supervisor:
         qs.chmod(0o755)
         for tool in ("bash", "sleep", "sed", "cat"):
             (self.bin / tool).symlink_to(shutil.which(tool, path="/usr/bin:/bin"))
+        if stop_in_backoff:
+            (self.bin / "sleep").unlink()
+            (self.bin / "sleep").write_text(FAKE_SLEEP)
+            (self.bin / "sleep").chmod(0o755)
         (self.tmp / "plan").write_text("\n".join(plan) + "\n")
         self.run_dir = self.tmp / "run"
         env = {"PATH": str(self.bin), "FAKE_DIR": str(self.tmp), "XDG_RUNTIME_DIR": str(self.run_dir)}
@@ -63,6 +84,9 @@ class Supervisor:
             time.sleep(0.05)
         return self.starts()
 
+    def pid(self, name):
+        return int((self.tmp / f"{name}.pid").read_text())
+
     def stop(self):
         if self.proc.poll() is None:
             self.proc.send_signal(signal.SIGTERM)
@@ -75,8 +99,8 @@ class Supervisor:
 
 
 class QsSuperviseTest(unittest.TestCase):
-    def sup(self, plan, sig=None):
-        s = Supervisor(plan, sig)
+    def sup(self, plan, sig=None, **kw):
+        s = Supervisor(plan, sig, **kw)
         self.addCleanup(s.stop)
         return s
 
@@ -117,7 +141,20 @@ class QsSuperviseTest(unittest.TestCase):
         s.proc.send_signal(signal.SIGTERM)
         s.proc.wait(timeout=5)
         self.assertEqual(s.proc.returncode, 0)
+        self.assertFalse(alive(s.pid("qs")), "the running qs was killed")
         time.sleep(1.5)
+        self.assertEqual(len(s.starts()), 1, "nothing restarted after SIGTERM")
+
+    def test_sigterm_during_backoff_stops_at_once_and_kills_the_sleep(self):
+        # qs fails at once; the back-off sleep sends SIGTERM to the supervisor as it starts,
+        # possibly before `child=$!` has run. The supervisor must still kill that sleep and
+        # exit promptly instead of sitting out the 30 s.
+        s = self.sup(["fail"], stop_in_backoff=True)
+        t0 = time.monotonic()
+        s.proc.wait(timeout=5)
+        self.assertLess(time.monotonic() - t0, 3)
+        self.assertEqual(s.proc.returncode, 0)
+        self.assertFalse(alive(s.pid("sleep")), "the back-off sleep was killed")
         self.assertEqual(len(s.starts()), 1, "nothing restarted after SIGTERM")
 
 
