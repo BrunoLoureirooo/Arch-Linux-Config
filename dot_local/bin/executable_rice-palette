@@ -183,8 +183,9 @@ def apply(arg):
         home / ".local/state/quickshell/wallpaper.json":
             json.dumps({"path": str(path), "palette": path.stem}) + "\n",
     }
-    # colors.lua is require()d by hyprland.lua: leave it untouched when nothing changed,
-    # so re-applying the same palette never writes a file of the Hyprland config.
+    # colors.lua is read by hyprland.lua through loadfile, which the autoreload does not
+    # watch (that, not this skip, is what keeps a write from reloading Hyprland); skip
+    # the write when nothing changed anyway.
     lua = home / ".config/hypr/colors.lua"
     try:
         if lua.read_text() == files[lua]:
