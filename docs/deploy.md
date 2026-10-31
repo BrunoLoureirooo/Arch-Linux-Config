@@ -578,6 +578,13 @@ trade-off, not planned to change. The controller revises this block after the fi
   re-enabled it, `hyprctl keyword monitor "eDP-1, disable"` kept answering `ok` without disabling the output
   (the same command your pre-port script used). Fresh instances passed every time (3 runs in a row). It only
   matters after a rollback; `hyprctl monitors` tells you whether the panel really went away.
+- **Any Hyprland config reload re-lights a closed lid's panel. [accepted/known]** With the lid closed
+  (`lid close` disabled eDP-1), anything that reloads the config turns the dark panel on again and
+  moves workspaces 11-15 back to it: Hyprland's autoreload after a `chezmoi apply` that changes
+  `hyprland.lua`, `binds.lua`, `autostart.lua` or `lib/pools.lua`, a hand edit of one of them, or
+  `hyprctl reload`. The reload re-applies the `hl.monitor` line for eDP-1 (the same happened under
+  hyprlang). A palette apply is NOT such a reload (section 9). Workaround: run `~/.local/bin/lid close`
+  again afterwards. A lid-aware monitor line would be a later improvement.
 - **No system tray host. [accepted/known]** blueman-applet and librepods icons are not shown; keep waybar's
   tray or ask for a Quickshell tray widget. The VOL chip is read-only; the XF86Audio keys change the volume.
 - **mako can take the notification name before the shell. [accepted/known; mitigation unverified]** mako's
