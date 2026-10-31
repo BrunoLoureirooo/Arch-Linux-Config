@@ -625,11 +625,17 @@ hypr/hyprpaper/waybar configs into the repo"**: merge that PR into `main` FIRST.
 
   ```sh
   git -C ~/.local/share/chezmoi rm dot_config/hypr/hyprland.lua
+  git -C ~/.local/share/chezmoi checkout 88a1c01 -- dot_config/waybar/config.jsonc
   git -C ~/.local/share/chezmoi commit -m "rollback: back to hyprland.conf"
   ```
 
   (chezmoi does not delete `~/.config/hypr/hyprland.lua` itself; step 2 below moves it away.) The
   feature branch's `hyprland.conf` is the synced live copy, so `chezmoi apply` keeps it correct.
+  The `checkout` line puts your synced live waybar config (commit 88a1c01) back into the source: the
+  branch's own `config.jsonc` carries the interim persistent workspaces (`DP-1` 1-5, `eDP-1` 11-15),
+  so without it the next `chezmoi apply` would overwrite the backup you restore in step 4, and under the
+  shared 1-9 hyprlang session waybar would show empty 11-15 cells. (Not `main`'s copy: without the
+  prerequisite PR it is the old stub.)
 
 Only then do the steps below.
 
