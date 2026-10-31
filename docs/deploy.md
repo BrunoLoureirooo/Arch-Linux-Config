@@ -499,6 +499,9 @@ hyprpaper total) is **not met**. Measured in the test rig (the real AMD iGPU thr
 | full shell, `QT_QUICK_BACKEND=software` | | ~203 MB | ~159 MB |
 | waybar + mako + hyprpaper together | 161 MB | 76 MB | 63 MB |
 
+The acceptance run on the final tree measured the full GL shell again: 624 MB RSS, 338 MB PSS, 303 MB USS,
+0.21 % CPU over 60 s (`docs/superpowers/notes/2026-10-23-acceptance.md`).
+
 Why: a GL Qt Quick process maps about 264 MB of shared GL libraries before it draws anything, and each
 large GL window costs about 17-18 MB private. The wallpaper layer is about +82 MB USS and the rail about
 +32 MB USS. CPU at idle was about 0.3-0.5 % of one core (S2 is met in the rig), and a 10-hour run showed
@@ -543,8 +546,8 @@ Measure on your machine first (section 5, item 13), then decide.
 <!-- KNOWN-ISSUES:BEGIN -->
 ## 12. Known issues and pending items
 
-Tags: `scheduled for fix` = in the controller's final fix wave; `accepted/known` = a decision or a
-trade-off, not planned to change. The controller revises this block after the fix wave.
+Tag: `accepted/known` = a decision or a trade-off, not planned to change. The final fix wave is done;
+nothing in this block is scheduled for a fix (as of the acceptance run, 2026-10-31).
 
 - **A timed-out or background carousel apply. [accepted/known]** After `✗ apply timed out` the strip
   stays visible without the keyboard (close it with `Ctrl+Alt+W`); the apply process is never killed,
