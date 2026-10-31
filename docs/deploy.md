@@ -726,6 +726,7 @@ whatever you disagree with. Where a line records no cost, none was recorded. `L<
 25. (L140) RULING (overturns the earlier "dGPU is active" ruling): a permanent nvidia-smi stream would keep the dGPU awake all session for a ~0% row, so the NVIDIA source becomes OPT-IN (`RICE_NVIDIA=1` via hl.env), default = AMD iGPU (the chip that drives the display). Sent to the U15 implementer before its review. — Cost if wrong: the owner adds one env line to show the 3050 Ti.
 26. (L146) Ruling: the U15 fix round is QUEUED until U13 (glitch spike) finishes (rig exclusivity; both touch tests/rig/selftest-qs.sh). Then resume the U15 implementer (a4d1e5f28ec4fa923) with the two Important findings + cheap minors (set nvStatusPath only when nvAllowed so the docs sentence is true; docs: TOCTOU line, setpriv-missing warning text, note measured vs unmeasured claims). FIX_BASE = U13's final head.
 27. (L149) Ruling: glitch is DROPPED; the DOM glitch in the render stays a mock only; the notes record the cost source and mitigations to try later.  (embedded in the U13 completion line)
+28. (L162) Rulings on the final review: C1 port both scripts into the repo (dot_local/bin/executable_lid/_headless), Lua IPC first with legacy fallback (rollback works), dpms BEFORE cutting peripherals and never cut the peripherals if dpms fails; I4 `xremap --watch=device`; I7 add pool-hop binds Ctrl+Alt+Up/Down (same slot in the next/previous pool present on the focused monitor); I9 add XF86Audio* volume/mute binds via wpctl, tray left out of scope and documented (accepted behaviour change); I8 docs + a separate PREREQUISITE PR with only the live-config sync (88a1c01) opened by the controller; I3 docs-only (mask mako.service + rollback unmask + owner check); I6 no reload, set border colours via hyprctl eval; wave: Clock service from Stats' tick, carousel Escape-during-apply + 15 s bound, Overlays singleton (M5), selftest HOME. Not done: tray widget, brightness binds (brightnessctl not installed), expireTimeout 0 semantics.  (no cost recorded; the binding details of each ruling are in the final-review findings the fix wave worked from, and the deviations from the spec are in its "Superseded by implementation" note)
 
 ## 16. Everything that was not verified (consolidated)
 
@@ -758,6 +759,28 @@ Nothing below was observed on your machine. "Rig" means the headless nested Hypr
 - Real `nvidia-smi` streaming (format, locale, first line within 6 s, death under `pdeathsig`), real VRAM numbers, the power/battery effect of the stream, that the card is `active` at login, hot reload while the stream runs; qs memory on the NVIDIA GL stack.
 - The idle RSS/CPU/PSS on the live session (the section 11 numbers are rig numbers).
 - Stacking with waybar during a transition (the rig has no waybar).
+
+**From the final-review rulings (section 15, item 28)**
+- C1, lid and headless: the ported scripts ran only against the nested rig (Lua config and a minimal
+  hyprlang stand-in, with a fake `sudo`); the real lid switch, the real XF86Launch2 key, the real USB power
+  cut and its order (displays dark first, peripherals back first) were never exercised.
+- I4, `xremap --watch=device`: re-grabbing the G502 and the Semico keyboard after `headless` powers them
+  back on was never run (no xremap against real devices at all).
+- I7, pool hop (`Ctrl+Alt+Up/Down`): tested in the rig with `hyprctl output remove` on headless outputs,
+  not with a real BenQ unplug or a real lid close.
+- I9, volume keys: the four `XF86Audio*` binds were registered and read back in the rig; `wpctl` never ran
+  and no real key was pressed. No tray host (accepted).
+- I3, mako: whether `systemctl --user mask mako.service` blocks the D-Bus activation under dbus-broker was
+  not tested.
+- I6, palette apply: `hyprctl eval` border recolouring and "writing `colors.lua` does not trigger the
+  autoreload" were seen only in the nested rig; any other config reload still re-lights a closed lid
+  (section 12).
+- I5, Terminal=true entries: a fake entry ran in a rig kitty with a tty, and its `%F` field code was dropped;
+  the real btop, nvim (`%F`) and yazi (`%f`) entries were not launched.
+- I1, plain text: hostile titles and names were rig fixtures; no real web page title or Bluetooth name.
+- Wave: the shared clock was tested with a mocked `Date` that jumps back an hour, not with a real
+  suspend/resume or a real DST change; the carousel's Escape during an apply, the 15 s bound and the
+  launcher/carousel hand-over were driven with a virtual keyboard only.
 
 **Process**
 - Nothing was applied to `$HOME`: `chezmoi apply`, the `statusLine` entry, package installs and the session restart are all yours.
