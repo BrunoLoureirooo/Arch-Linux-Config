@@ -829,9 +829,13 @@ mkdesk firefox-fake "Firefox Fake" "Web Browser" "internet;" firefox
 mkdesk rig-hidden "Rig Hidden Entry" "Hidden" "" hidden "NoDisplay=true"
 for i in 01 02 03 04 05 06 07 08 09 10; do mkdesk "rig-many-$i" "Rig Many $i" "Filler" "" "many$i"; done
 # Terminal=true: the launcher must give it a terminal (kitty -e); the marker records
-# whether stdin was a tty.
-printf '[Desktop Entry]\nType=Application\nName=Term Fake\nTerminal=true\nExec=sh -c "if test -t 0; then echo tty > %s/term; else echo notty > %s/term; fi"\n' \
-    "$markers" "$markers" >"$apps/applications/term-fake.desktop"
+# whether stdin was a tty, then the argument count and arguments. The Exec carries a
+# field code like the real entries (nvim: `Exec=nvim %F`): with no file to open it must
+# be dropped, not passed on as a literal "%F".
+printf '#!/bin/sh\nif test -t 0; then echo tty; else echo notty; fi > %s/term\necho "$# $*" > %s/term-args\n' \
+    "$markers" "$markers" >"$tmp/term-fake.sh"
+printf '[Desktop Entry]\nType=Application\nName=Term Fake\nTerminal=true\nExec=sh %s %%F\n' \
+    "$tmp/term-fake.sh" >"$apps/applications/term-fake.desktop"
 "$R/run.sh" wtype -s 900000 >/dev/null 2>&1 &
 holder_pid=$!
 XDG_DATA_DIRS="$apps" "$R/qs-run.sh" start --entry "$R/launcher.qml" >/dev/null
@@ -982,6 +986,9 @@ nk1=$(H clients -j | spy "len([c for c in d if c['class'] == 'kitty'])")
 [[ "$(cat "$markers/term" 2>/dev/null)" == tty && "$(lj "d['open']")" == False && "$nk1" == "$nk0" ]] \
     && pass "Terminal=true entry ran in a kitty with a tty (marker 'tty'); that kitty closed again" \
     || fail "terminal entry: marker '$(cat "$markers/term" 2>/dev/null)', open $(lj "d['open']"), kitty windows $nk0 -> $nk1"
+[[ -s "$markers/term-args" && "$(cat "$markers/term-args")" == "0 " ]] \
+    && pass "the %F field code was dropped: the command got no arguments ('$(cat "$markers/term-args")')" \
+    || fail "field code: the command got '$(cat "$markers/term-args" 2>/dev/null)' (want '0 ')"
 H dispatch 'hl.dsp.focus({ monitor = "DP-1" })' >/dev/null
 [[ -z "$(warns_since "$n0")" ]] && pass "qs log: no ERROR/WARN in section 8" || { fail "qs log section 8"; warns_since "$n0"; }
 kill -TERM "$kitty_pid" 2>/dev/null || true
