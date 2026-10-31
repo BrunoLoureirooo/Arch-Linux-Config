@@ -43,8 +43,6 @@
 > - **Delivery:** nothing was applied to the live system. Phases that asked the owner first became the
 >   checklist in `docs/deploy.md`; verification ran in a private headless nested-Hyprland rig (`tests/rig/`).
 >   The full list of rulings is in `docs/deploy.md` section 15 and `docs/superpowers/notes/2026-10-23-sdd-ledger.md`.
-> - **Pending after the final fix wave:** `SystemClock` is to be replaced by a timer-based clock (daylight-saving
->   finding) and the carousel's `rice-palette apply` gets a timeout (`docs/deploy.md` section 12).
 
 Date: 2026-10-23
 Status: draft for review
@@ -198,7 +196,7 @@ CLI: `rice-palette apply <image>`. Steps: run `matugen image <image> --json hex 
 - `warn = (L .88, C .15, hue 95)`, independent of the wallpaper.
 - Contrast guarantees, enforced by nudging lightness: fg on bg at least 7:1, a1 on bg at least 7:1, a2 on bg at least 4.5:1, dim on bg at least 4.5:1.
 
-Outputs: `~/.config/quickshell/colors.json` (the eight tokens, hot-reloaded by the shell), `~/.config/kitty/colors.conf`, `~/.config/hypr/colors.lua` (`hl.config` border colours, applied by `hyprctl reload`), and `~/.config/btop/themes/rice.theme`. Reload: kitty gets `SIGUSR1` (reload config), Hyprland `hyprctl reload`, btop on its next start.
+Outputs: `~/.config/quickshell/colors.json` (the eight tokens, hot-reloaded by the shell), `~/.config/kitty/colors.conf`, `~/.config/hypr/colors.lua` (`hl.config` border colours, applied by `hyprctl reload`), and `~/.config/btop/themes/rice.theme`. Reload: kitty gets `SIGUSR1` (reload config), Hyprland `hyprctl reload`, btop on its next start. (Superseded: Hyprland is never reloaded; the running borders are recoloured with `hyprctl eval 'hl.config(...)'` and `colors.lua` is read at the next start or reload, see the header note.)
 
 The five palettes in the render were hand-picked. Real palettes come from the user's actual wallpapers, so they will differ; that is expected.
 
