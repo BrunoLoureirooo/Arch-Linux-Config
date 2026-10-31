@@ -1396,11 +1396,37 @@ sleep 1
     && "$(cj "(d['theme']['a1'], d['wallFile'].endswith('/ember.png'), d['previewing'])")" == "('$a1_ember', True, False)" ]] \
     && pass "the late apply finished (never killed): ember written and read by the shell" \
     || fail "late apply: $(cat "$staged/.local/state/quickshell/wallpaper.json"); $(cj d)"
+
+# j2. A late SUCCESS while the timed-out carousel is still open clears '✗ apply timed out'
+#     (the files were written and the shell reads them through its watches).
+echo 17 >"$tmp/c9/apply-delay"
+ctoggle
+settled || fail "late success: derivation did not finish"
+K -k Right
+settled || fail "late success: Right did not settle"
+sel_j2=$(cj "d['selName']")
+rm -f "$tmp/c9/apply-started"
+K -k Return
+for _ in $(seq 20); do [[ -e "$tmp/c9/apply-started" ]] && break; sleep 0.1; done
+for _ in $(seq 200); do [[ "$(cj "d['grab']")" == False ]] && break; sleep 0.1; done
+to_j2=$(cj "(d['open'], d['applying'], d['texts'][-1])")
+for _ in $(seq 100); do [[ "$(cj "d['applying']")" == False ]] && break; sleep 0.2; done
+sleep 1
+after_j2=$(cj "(d['open'], d['applying'], d['texts'][-1], d['theme']['a1'])")
+[[ "$sel_j2" == moss.png && "$to_j2" == "(True, True, '✗ apply timed out')" \
+    && "$after_j2" == "(True, False, 'PALETTE', '$a1_moss')" \
+    && "$(spy "d['path']" <"$staged/.local/state/quickshell/wallpaper.json")" == "$wp/moss.png" ]] \
+    && pass "late success while still open: '✗ apply timed out' is cleared, moss written and shown" \
+    || fail "late success: sel $sel_j2, at timeout $to_j2, after $after_j2, $(cat "$staged/.local/state/quickshell/wallpaper.json")"
+ctoggle
+[[ "$(cj "(d['open'], d['previewing'], d['theme']['a1'])")" == "(False, False, '$a1_moss')" ]] \
+    && pass "closing after the late success keeps the applied palette (read from the files)" \
+    || fail "close after late success: $(cj d)"
 mv -f "$cli.real" "$cli"
-ntimeout=$(warns_since "$n0" | grep -c 'Carousel: apply of .*/ember\.png gave no result within 15000 ms' || true)
-bad=$(warns_since "$n0" | grep -v 'Carousel: apply of .*/ember\.png gave no result within 15000 ms' || true)
-[[ -z "$bad" && "$ntimeout" == 1 ]] && pass "qs log: one timeout warning, nothing else, for i/j" \
-    || { fail "qs log i/j ($ntimeout timeout warnings)"; echo "$bad"; }
+ntimeout=$(warns_since "$n0" | grep -c -E 'Carousel: apply of .*/(ember|moss)\.png gave no result within 15000 ms' || true)
+bad=$(warns_since "$n0" | grep -v -E 'Carousel: apply of .*/(ember|moss)\.png gave no result within 15000 ms' || true)
+[[ -z "$bad" && "$ntimeout" == 2 ]] && pass "qs log: one timeout warning each for j and j2, nothing else, for i/j/j2" \
+    || { fail "qs log i/j/j2 ($ntimeout timeout warnings)"; echo "$bad"; }
 
 # k. One keyboard-grabbing overlay at a time: the launcher opening closes the carousel
 #    (dropping its preview) and the other way round.

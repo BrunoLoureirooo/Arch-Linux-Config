@@ -18,7 +18,8 @@
 // background (never killed half-way), its preview stays until it lands, and a failure
 // then drops the preview. An apply with no result within applyTimeout (15 s) is no
 // longer waited for: `✗ apply timed out`, the keyboard grab is released, the preview
-// stays until the carousel is closed (the process itself is still not killed).
+// stays until the carousel is closed (the process itself is still not killed); if it
+// then succeeds while the strip is still open, the timed-out line is cleared.
 // The CLI runs by absolute path ($HOME/.local/bin/rice-palette): the session's PATH
 // (greetd -> start-hyprland, no login shell) has no ~/.local/bin.
 // Only one keyboard-grabbing overlay at a time (Overlays): the launcher opening closes
@@ -253,8 +254,12 @@ Scope {
             // Late (timed out, or the carousel was reopened): the files, if written,
             // reach Theme through its watch; only the wallpaper state is re-read.
             console.info("Carousel: late apply of", p, ok ? "finished" : "failed (exit " + applyProc.code + ")");
-            if (ok)
+            if (ok) {
                 WallpaperState.reload();
+                // A strip still open after the timeout no longer claims it timed out.
+                if (applyError === "timed out")
+                    applyError = "";
+            }
             return;
         }
         if (!ok) {

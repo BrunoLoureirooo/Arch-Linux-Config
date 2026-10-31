@@ -546,10 +546,14 @@ Measure on your machine first (section 5, item 13), then decide.
 Tags: `scheduled for fix` = in the controller's final fix wave; `accepted/known` = a decision or a
 trade-off, not planned to change. The controller revises this block after the fix wave.
 
-- **A timed-out carousel apply. [accepted/known]** After `✗ apply timed out` the strip stays visible
-  without the keyboard (close it with `Ctrl+Alt+W`); the apply process is never killed, and if it
-  finishes later its files still recolour the shell. While that late apply is still running, Enter in a
-  reopened carousel does nothing.
+- **A timed-out or background carousel apply. [accepted/known]** After `✗ apply timed out` the strip
+  stays visible without the keyboard (close it with `Ctrl+Alt+W`); the apply process is never killed,
+  and if it finishes later its files still recolour the shell. If that late apply succeeds while the
+  strip is still open, the `✗ apply timed out` line is cleared; if it fails late, the line stays until
+  you close the strip. If you reopen the carousel while an earlier apply is still running in the
+  background (after Escape or a timeout), Left/Right and Enter do nothing until that apply ends (the
+  header still says `←/→ select`); Escape and `Ctrl+Alt+W` still close it, so the keyboard is never
+  stuck.
 - **Glitch effect dropped. [accepted/known]** The workspace-switch glitch was evaluated and dropped: idle
   CPU and frame timing were fine, but about +45 MB of memory stayed retained after it had played (562 to
   ~611 MB with it, 550 to ~555 MB without). The glitch toggle on the render page is a mock only. See
