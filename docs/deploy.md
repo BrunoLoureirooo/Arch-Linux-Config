@@ -310,7 +310,9 @@ Do these in order. Anything that fails: note it, and use section 13 if the deskt
    media, bluetooth, claude) only on the BenQ. Wallpaper on both screens (default image
    `~/Pictures/berserk-wallpaper.jpg`).
 7. **Launcher.** `Super+Space` opens it; type to filter, Up/Down, Enter runs, Escape closes. After
-   closing, typing must reach the window underneath.
+   closing, typing must reach the window underneath. Pick btop (a `Terminal=true` entry) from the
+   launcher: it must open in a new kitty window, and quitting btop closes that kitty. Also pick nvim
+   (`Exec=nvim %F`): it must open an empty buffer, not a file named `%F`.
 8. **Carousel and palette.** Put images in `~/Pictures/wallpapers/` (section 9), press `Ctrl+Alt+W`,
    scroll with Left/Right (the wallpaper previews live), Enter applies (runs `rice-palette apply`,
    recolours kitty, Hyprland borders and the shell), Escape reverts. Or from a terminal:
