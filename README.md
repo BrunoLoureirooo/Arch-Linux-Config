@@ -9,7 +9,7 @@ Personal Arch Linux dotfiles managed with [chezmoi](https://www.chezmoi.io/).
 | `~/.bashrc` | Shell config — zoxide, fastfetch on login, nvim as `$EDITOR` |
 | `~/.gitconfig` | Git user identity |
 | `~/.config/hypr/` | Hyprland compositor config in Lua (`hyprland.lua`, `binds.lua`, `autostart.lua`, per-screen workspace pools in `lib/pools.lua`); the old `hyprland.conf` and `hyprpaper.conf` stay as the rollback copy |
-| `~/.config/quickshell/` | Quickshell shell (bar on each screen, right-hand rail, wallpaper layer, launcher, notification toasts, wallpaper carousel, workspace-switch glitch) replacing waybar, wofi, mako and hyprpaper |
+| `~/.config/quickshell/` | Quickshell shell (bar on each screen with VOL, NET, BAT; right-hand rail on the laptop panel `eDP-1`, falling back to the main screen with the lid closed, toggled with `qs ipc call rail toggle`; a centred clock on empty workspaces; wallpaper layer, launcher, notification toasts, wallpaper carousel, workspace-switch glitch) replacing waybar, wofi, mako and hyprpaper |
 | `~/.config/xremap/` | xremap config: Mac-style Super/Alt shortcuts in GUI apps (not kitty) |
 | `~/.config/kitty/` | kitty config (JetBrainsMono Nerd Font, Super copy/paste/tab maps, palette colours) |
 | `~/.local/bin/rice-palette`, `~/.local/share/rice/` | Palette tool: derives the neon palette from a wallpaper with matugen and writes the shell, kitty, Hyprland and btop colours |
@@ -20,7 +20,7 @@ Personal Arch Linux dotfiles managed with [chezmoi](https://www.chezmoi.io/).
 | `~/.config/wofi/` | Wofi launcher config and stylesheet (retired by the Quickshell launcher, kept for rollback) |
 | `~/.config/nvim/` | Neovim config via [LazyVim](https://lazyvim.org/) |
 | `~/.config/btop/` | btop system monitor config |
-| `tests/` | Unit tests (`lua tests/lua/*.lua`, `python3 -m unittest discover -s tests -p 'test_*.py'`) and `tests/rig/`, a private headless nested-Hyprland rig for testing the shell without touching the live session. Not deployed |
+| `tests/` | Unit tests (`lua tests/lua/*.lua`, `python3 -m unittest discover -s tests -p 'test_*.py'`) and `tests/rig/`, a private headless nested-Hyprland rig for testing the shell without touching the live session (`selftest.sh`, `selftest-qs.sh`, `selftest-rail.sh` for the rail placement/toggle/layout, the CPU temperature row and the empty-workspace clock). Not deployed |
 | `docs/` | [Deployment guide](docs/deploy.md), [Claude limits setup](docs/claude-statusline.md), [design reference](docs/superpowers/design/) (render page and mock screenshots), spec, plan and notes under `docs/superpowers/`. Not deployed |
 
 ## Install

@@ -26,6 +26,13 @@
 >   was added, `WallpaperState.qml` holds the wallpaper choice (with `preview`/`clearPreview` for the carousel),
 >   the rail widgets are in `rail/`. `Chamfer` is two closed filled polygons (Qt 6.11 `ShapePath` has no stroke gradient).
 > - **Rail** ignores exclusive zones; a 1 px invisible overlay surface reserves its width (direct-scanout trade-off).
+> - **Rail placement, toggle, layout** (owner request, 2026-11-02): the rail lives on the built-in panel (output
+>   name starting with `eDP`, not focus), falling back to the main screen while the lid is closed. `qs ipc call
+>   rail toggle|hide|status` (and `rail -- show`) hides it completely (no surface, no zone; in-memory state, starts
+>   shown). It fills the height: clock and SYS (the network graph grows) at the top, media/bluetooth/claude at
+>   the bottom edge. SYS gained a TMP row (CPU temperature from hwmon k10temp/coretemp or thermal, read on the 2 s
+>   tick). Bar right side: VOL, NET, BAT (CPU and MEM only in the rail). Empty workspaces show a centred clock HUD
+>   (`hud/CentreClock.qml`, bottom layer, click-through).
 > - **`qs-supervise`** restarts qs 1 s after it exits (spec: within 2 s), backing off (doubling up to 30 s) while qs dies within 5 s of starting, and exits when the compositor is gone; xremap starts with `--watch=device` (re-grabs keyboards that reappear, e.g. after the headless toggle).
 > - **`lid` and `headless` scripts** are now in the repo (`dot_local/bin/executable_lid`, `executable_headless`) and
 >   ported to the Lua IPC (`hyprctl eval 'hl.monitor(...)'`, `hyprctl dispatch 'hl.dsp.dpms(...)'`) with the hyprlang
@@ -131,7 +138,8 @@ Six units, each with one job and a plain interface between them.
   kitty (own Super maps)   Quickshell (one process, one QML tree)
                             |-- Wallpaper layer (Background, one per screen)
                             |-- Bar (top, one per screen)
-                            |-- Rail (right, main screen only)
+                            |-- Rail (right, laptop panel; main screen with the lid closed)
+                            |-- Empty-workspace clock HUD (Bottom, one per screen, only while empty)
                             |-- Launcher, Carousel, Toasts (overlay layer, on demand)
                             |-- Glitch overlay (optional, section 8)
   rice-palette (CLI) --writes--> colors.json / kitty colors / hypr colors.lua

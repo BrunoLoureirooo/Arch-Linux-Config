@@ -11,7 +11,7 @@ Contents: 1 what this is, 2 prerequisites, 3 xremap permissions, 4 back up and a
 ## 1. What this is, and the warning
 
 This branch replaces waybar + wofi + mako + hyprpaper with one Quickshell shell (a bar on each
-screen, a right-hand rail on the main screen, wallpaper layer, launcher, notification toasts,
+screen, a right-hand rail on the laptop panel, wallpaper layer, launcher, notification toasts,
 wallpaper carousel), moves Hyprland to a Lua config with one workspace pool per screen, adds an
 xremap config that gives you Mac-style Super/Alt shortcuts, a kitty config, and two small tools
 (`rice-palette` for the wallpaper palette, `claude-limits-statusline` for Claude usage limits).
@@ -288,7 +288,8 @@ Do these in order. Anything that fails: note it, and use section 13 if the deskt
 4. **BenQ matching.** `hyprctl monitors`: the BenQ must show description `BNQ BenQ EX2510S K8M02386019`
    (it is matched by description, not by the port name) at `0x0`, and `eDP-1` at `1920x0`. This was not
    testable in the rig (headless outputs have no description). If the BenQ is not matched, the pool
-   assignment, the workspace-1 default and the rail's "main screen" choice all fall back and the pools
+   assignment, the workspace-1 default and the "main screen" choice (toasts, the rail's lid-closed
+   fallback) all fall back and the pools
    may be swapped.
 5. **Pool behaviour and unplug.** `Ctrl+1..5` focuses workspaces 1-5 on the BenQ and 11-15 on the laptop
    panel, independently: compare `hyprctl monitors -j` before and after a switch, the other screen's
@@ -308,10 +309,21 @@ Do these in order. Anything that fails: note it, and use section 13 if the deskt
    moved pool, pick that slot with `Ctrl+N` and hop again. Check it: unplug the BenQ (or
    `~/.local/bin/lid close` for the other direction), hop, see the windows, plug back in.
 6. **Bar and rail on both screens.** A bar on the top of each screen showing its own five workspaces
-   (active filled, occupied underlined; CPU, MEM, VOL, NET and BAT chips). The rail (clock, sys meters,
-   media, bluetooth, claude) only on the BenQ. `Super+Alt+R` hides the rail and pressing it again
-   brings it back (in Firefox too: xremap's `Super+R` reload rule must not fire). Wallpaper on both screens (default image
-   `~/Pictures/berserk-wallpaper.jpg`).
+   (active filled, occupied underlined; bar right side: VOL, NET, BAT). The rail (clock, sys meters
+   CPU/MEM/GPU/TMP and the network graph at the top; media, bluetooth, claude at the bottom edge, so it
+   fills the screen height) only on the laptop panel (`eDP-1`, chosen by output name, not focus). With
+   the lid closed (`eDP-1` disabled) it moves to the BenQ, and back when the lid opens. CPU and MEM are
+   only in the rail now, so with the rail hidden or on the other screen those numbers are not on every
+   screen. TMP is the CPU temperature (k10temp `Tctl` here; read from sysfs on the shared 2 s tick).
+   `qs ipc call rail toggle` hides or shows it (`qs ipc call rail hide`, `qs ipc call rail -- show`;
+   `show` needs the `--` because `qs ipc` treats a bare `show` as its own listing command;
+   `qs ipc call rail status` prints `shown eDP-1` / `hidden ...`). Hidden means gone: no surface and no
+   reserved width, windows use the full screen. The state is in memory only (a qs restart shows it
+   again). `Super+Alt+R` does the same toggle from the keyboard (in Firefox too: xremap's `Super+R`
+   reload rule must not fire). On a workspace with no windows each screen shows a big centred clock with
+   `<OUTPUT> · WORKSPACE <slot> · EMPTY` and the key hints `Ctrl 1-5`, `Ctrl Alt W`, `Super Space`;
+   it is click-through and disappears as soon as a window opens there. Wallpaper on both screens
+   (default image `~/Pictures/berserk-wallpaper.jpg`).
    **Glitch.** Every workspace change tears that screen for about 130 ms (displaced bands, red/cyan
    ghosts, corrupted blocks over the windows), whatever caused it: `Ctrl+1..5`, the step keys, the side
    buttons, a bar click, a moved workspace. The other screen does not glitch. Clicks and keys go through
