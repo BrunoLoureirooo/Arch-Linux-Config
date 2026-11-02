@@ -33,6 +33,14 @@
 >   the bottom edge. SYS gained a TMP row (CPU temperature from hwmon k10temp/coretemp or thermal, read on the 2 s
 >   tick). Bar right side: VOL, NET, BAT (CPU and MEM only in the rail). Empty workspaces show a centred clock HUD
 >   (`hud/CentreClock.qml`, bottom layer, click-through).
+> - **Rail sections, gaps** (owner request, 2026-11-02, supersedes the layout line above): no clock in the rail
+>   (the bar and the HUD have it). Top to bottom: SYS (thicker rows, the network graph capped at about two rows),
+>   DISK (`/` and up to two more local ext4/btrfs/xfs/f2fs/vfat filesystems, one `df` every 30 shared ticks),
+>   VOLUME (default sink name and volume, `MUTED`, up to three playback streams, read only, from Pipewire),
+>   MEDIA (only with a player), BLUETOOTH (always shown; `no devices connected` / `bluetooth off` / `no adapter`),
+>   CLAUDE; the spare height is shared by the gaps between sections. The bar and the rail float
+>   `Theme.gapOut` = 6 px (= `general.gaps_out`, checked by `tests/test_gaps.py`) off the screen edges like
+>   tiled windows; their reserved zones include that gap.
 > - **`qs-supervise`** restarts qs 1 s after it exits (spec: within 2 s), backing off (doubling up to 30 s) while qs dies within 5 s of starting, and exits when the compositor is gone; xremap starts with `--watch=device` (re-grabs keyboards that reappear, e.g. after the headless toggle).
 > - **`lid` and `headless` scripts** are now in the repo (`dot_local/bin/executable_lid`, `executable_headless`) and
 >   ported to the Lua IPC (`hyprctl eval 'hl.monitor(...)'`, `hyprctl dispatch 'hl.dsp.dpms(...)'`) with the hyprlang

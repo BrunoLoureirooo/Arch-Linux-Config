@@ -309,12 +309,20 @@ Do these in order. Anything that fails: note it, and use section 13 if the deskt
    moved pool, pick that slot with `Ctrl+N` and hop again. Check it: unplug the BenQ (or
    `~/.local/bin/lid close` for the other direction), hop, see the windows, plug back in.
 6. **Bar and rail on both screens.** A bar on the top of each screen showing its own five workspaces
-   (active filled, occupied underlined; bar right side: VOL, NET, BAT). The rail (clock, sys meters
-   CPU/MEM/GPU/TMP and the network graph at the top; media, bluetooth, claude at the bottom edge, so it
-   fills the screen height) only on the laptop panel (`eDP-1`, chosen by output name, not focus). With
+   (active filled, occupied underlined; bar right side: VOL, NET, BAT). The rail (no clock: SYS meters
+   CPU/MEM/GPU/TMP and a small network graph at the top, then DISK, VOLUME, MEDIA while something plays,
+   BLUETOOTH and CLAUDE down to the bottom edge, so it fills the screen height) only on the laptop panel (`eDP-1`, chosen by output name, not focus). With
    the lid closed (`eDP-1` disabled) it moves to the BenQ, and back when the lid opens. CPU and MEM are
    only in the rail now, so with the rail hidden or on the other screen those numbers are not on every
    screen. TMP is the CPU temperature (k10temp `Tctl` here; read from sysfs on the shared 2 s tick).
+   DISK lists `/` first and at most two more local ext4/btrfs/xfs/f2fs/vfat filesystems (`/home`, `/boot`
+   here) as `used/total NN%`, warn colour from 90 %; compare with `df -h` (it refreshes once a minute).
+   VOLUME shows the default output's name (play something on the AirPods and on the speakers and see the
+   name follow), its volume (compare `wpctl get-volume @DEFAULT_AUDIO_SINK@`; it reads `MUTED` when
+   muted) and up to three playing apps with their own volume (`no streams` when nothing plays).
+   **Gaps.** The bar and the rail float 6 px off the screen edges, the same `gaps_out` as windows: open a
+   kitty and check there is the same strip of wallpaper between it and the bar, the rail and the screen
+   edges (no double gap, no overlap). `Theme.gapOut` must stay equal to `general.gaps_out`.
    `qs ipc call rail toggle` hides or shows it (`qs ipc call rail hide`, `qs ipc call rail -- show`;
    `show` needs the `--` because `qs ipc` treats a bare `show` as its own listing command;
    `qs ipc call rail status` prints `shown eDP-1` / `hidden ...`). Hidden means gone: no surface and no
@@ -364,7 +372,8 @@ Do these in order. Anything that fails: note it, and use section 13 if the deskt
     @DEFAULT_AUDIO_SINK@` before and after, and the VOL chip follows), mute toggles, mic mute toggles the default
     source. No tray: if you depend on the blueman or librepods tray menus, decide now (section 1).
 11. **Bluetooth widget.** The rail section lists connected devices with their battery when BlueZ reports
-    one (hidden while nothing is connected). Connect a device and see it appear. AirPods left/right/case
+    one; it is always shown, with `no devices connected` (or `bluetooth off` with the adapter powered off,
+    `no adapter` without one) when nothing is connected. Connect a device and see it replace that line. AirPods left/right/case
     levels are not shown by design.
 12. **Status line / Claude limits.** Section 8. The claude section reads `no data` until you enable the
     status line and send one message.
@@ -811,6 +820,7 @@ Nothing below was observed on your machine. "Rig" means the headless nested Hypr
 - Kitty `SIGUSR1` after `rice-palette apply` (stubbed in every test); the border recolouring through `hyprctl eval` ran only against the nested rig (`tests/hypr/palette_lid.sh`), not your session; the generated btop theme in btop on your real terminal (btop 1.4.7 was run in a pseudo-terminal with a temp HOME: `color_theme = "rice"` picks up a `rice.theme` rendered from the seed palette, and with the file missing btop starts on its built-in colours); the chezmoi-deployed layout of `~/.local/bin` finding `~/.local/share/rice`.
 - Your actual wallpapers (JPEG/WebP size parsing is covered by fixtures only), the carousel under rapid scrolling, the startup wallpaper race (guarded but never reproduced).
 - Media players other than the one the rig could read; the rail with a 15 % battery row; real PipeWire volume changes; clicking a bar cell with a real pointer.
+- The rail's VOLUME section against the real PipeWire/WirePlumber graph (the rig used null sinks and lingering null nodes as streams; real app names, AirPods sink names and paused browser streams were not seen); DISK against this machine's real `df` only (no btrfs, f2fs or removable disks).
 - Real connected Bluetooth devices and their battery values (none were connected during the build); whether BlueZ reports a single AirPods level at all.
 - The carousel on your session: it runs `$HOME/.local/bin/rice-palette` by absolute path; the rig ran it with no `~/.local/bin` on PATH, which is what your session's PATH looks like (read from the live Hyprland process).
 - A real Claude Code session feeding the cache, and whether your plan reports `rate_limits`; the 30 s missing-file re-read of the Claude cache via the timer path (seen working once by hand).
