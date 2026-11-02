@@ -309,6 +309,12 @@ Do these in order. Anything that fails: note it, and use section 13 if the deskt
    (active filled, occupied underlined; CPU, MEM, VOL, NET and BAT chips). The rail (clock, sys meters,
    media, bluetooth, claude) only on the BenQ. Wallpaper on both screens (default image
    `~/Pictures/berserk-wallpaper.jpg`).
+   **Glitch.** Every workspace change tears that screen for about 130 ms (displaced bands, red/cyan
+   ghosts, corrupted blocks over the windows), whatever caused it: `Ctrl+1..5`, the step keys, the side
+   buttons, a bar click, a moved workspace. The other screen does not glitch. Clicks and keys go through
+   it. Turn it off with `qs ipc call glitch disable` (creates `~/.local/state/quickshell/glitch-disabled`;
+   creating that file by hand works too, at once) and back on with `qs ipc call glitch enable`. Check
+   that `hyprctl layers` shows no `rice-glitch` surface when nothing is switching.
 7. **Launcher.** `Super+Space` opens it; type to filter, Up/Down, Enter runs, Escape closes. After
    closing, typing must reach the window underneath. Pick btop (a `Terminal=true` entry) from the
    launcher: it must open in a new kitty window, and quitting btop closes that kitty. Also pick nvim
@@ -502,6 +508,20 @@ hyprpaper total) is **not met**. Measured in the test rig (the real AMD iGPU thr
 The acceptance run on the final tree measured the full GL shell again: 624 MB RSS, 338 MB PSS, 303 MB USS,
 0.21 % CPU over 60 s (`docs/superpowers/notes/2026-10-23-acceptance.md`).
 
+**Transparent huge pages are now off for qs** (2026-11-02, with the glitch). The kernel here runs THP in
+`always` mode, and with it qs kept freed driver and Qt scratch memory resident in half-used 2 MB pages.
+`qs-supervise` now starts qs through a two-line `python3` shim that sets `PR_SET_THP_DISABLE` and execs qs
+(same PID; without python3 it starts qs as before). Rig, production shell, 10 s after start, same session:
+
+| | RSS | PSS | anonymous |
+|---|---|---|---|
+| THP on (before) | ~448 MB | ~279 MB | ~226 MB |
+| THP off (now) | ~320 MB | ~150 MB | ~98 MB |
+
+These are not directly comparable with the table above (that was measured at a different point, by
+earlier units); compare on your machine with item 13 of section 5. Check it is in effect:
+`grep THP_enabled /proc/$(pgrep -x qs | head -1)/status` prints `0`.
+
 Why: a GL Qt Quick process maps about 264 MB of shared GL libraries before it draws anything, and each
 large GL window costs about 17-18 MB private. The wallpaper layer is about +82 MB USS and the rail about
 +32 MB USS. CPU at idle was about 0.3-0.5 % of one core (S2 is met in the rig), and a 10-hour run showed
@@ -557,10 +577,22 @@ nothing in this block is scheduled for a fix (as of the acceptance run, 2026-10-
   background (after Escape or a timeout), Left/Right and Enter do nothing until that apply ends (the
   header still says `←/→ select`); Escape and `Ctrl+Alt+W` still close it, so the keyboard is never
   stuck.
-- **Glitch effect dropped. [accepted/known]** The workspace-switch glitch was evaluated and dropped: idle
-  CPU and frame timing were fine, but about +45 MB of memory stayed retained after it had played (562 to
-  ~611 MB with it, 550 to ~555 MB without). The glitch toggle on the render page is a mock only. See
-  `docs/superpowers/notes/2026-10-23-glitch-spike.md`.
+- **Workspace glitch: on by default, resolving half only. [accepted/known]** A workspace change tears
+  the screen it happened on (`dot_config/quickshell/fx/Glitch.qml`, shader `fx/glitch.frag.qsb`).
+  Off: `qs ipc call glitch disable` or the file `~/.local/state/quickshell/glitch-disabled`; on: `qs ipc
+  call glitch enable`. Behaviour and costs, measured in the rig:
+  - It plays the last three of the render's six steps (about 130 ms, not 250 ms) on a capture taken
+    after the switch. Hyprland reports the change only once it is done, so the old workspace can no
+    longer be captured (spec section 8's fallback). The overlay appears 18-36 ms after the change.
+  - Memory: the overlay window, the capture and the timer exist only while it plays. With transparent
+    huge pages off (section 11), 20 plays plus 30 s of rest left 0 to +7 MB anonymous memory and
+    0 to +6 MB PSS over six runs (control without the glitch: about +1 MB); 60 plays left no more. With THP on it was about +20 MB
+    anonymous, and the spike's ~+45 MB was measured that way too. Section 11 has the numbers.
+  - Nothing runs between plays: no timer, no window, no process. The off flag is read once per switch.
+  - The shader was compiled with Qt 6.11's `qsb`. Rebuild it after a Qt major update if the log says the
+    shader cannot be loaded: `/usr/lib/qt6/bin/qsb --qt6 -o glitch.frag.qsb glitch.frag` in
+    `dot_config/quickshell/fx/`.
+  - Notes: `docs/superpowers/notes/2026-10-23-glitch-spike.md` (spike and outcome).
 - **The interim waybar edit stays in the repo. [accepted/known]** `dot_config/waybar/config.jsonc` has
   `persistent-workspaces` per output (`DP-1` 1-5, `eDP-1` 11-15) and the hard-coded `wlan0` interface line
   removed, so waybar matches the pools while it is retired but kept. With `all-outputs: true` both bars
@@ -766,6 +798,13 @@ Nothing below was observed on your machine. "Rig" means the headless nested Hypr
 - Real `nvidia-smi` streaming (format, locale, first line within 6 s, death under `pdeathsig`), real VRAM numbers, the power/battery effect of the stream, that the card is `active` at login, hot reload while the stream runs; qs memory on the NVIDIA GL stack.
 - The idle RSS/CPU/PSS on the live session (the section 11 numbers are rig numbers).
 - Stacking with waybar during a transition (the rig has no waybar).
+- The workspace glitch on your screens: the capture and shader on the live GPU path (the rig renders on
+  the AMD iGPU through radeonsi; the NVIDIA GL stack was not tried), at 144 Hz, with a hardware cursor
+  (the rig's software cursor shows in the captures as red/cyan ghost cursors), with real key and mouse
+  input (the rig used wtype and a virtual pointer). If you turn on `ecosystem.enforce_permissions`, qs
+  needs an `hl.permission` entry for screen capture or the glitch has nothing to show.
+- The THP shim in `qs-supervise` on your session (rig only; the `THP_enabled` check is in section 11),
+  and its memory effect on your machine.
 
 **From the final-review rulings (section 15, item 28)**
 - C1, lid and headless: the ported scripts ran only against the nested rig (Lua config and a minimal

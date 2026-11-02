@@ -5,8 +5,11 @@
 >
 > - **Memory budget (S1) not met.** The shell measured about 345 MB PSS / 620 MB RSS in the test rig
 >   (203 MB PSS with `QT_QUICK_BACKEND=software`) against 156 MB RSS. Options are in `docs/deploy.md` section 11.
-> - **Glitch (section 8) dropped.** The spike showed about +45 MB of memory retained after it played; no
->   glitch code is in the shell. The render page's glitch is a mock only.
+> - **Glitch (section 8): on by default since 2026-11-02**, at the owner's request (first dropped after the
+>   spike retained about +45 MB). It plays the resolving half (steps 4-6, about 130 ms) on a capture taken
+>   after the switch, is triggered by Hyprland's workspace events rather than binds, and turns off with
+>   `qs ipc call glitch disable` or `~/.local/state/quickshell/glitch-disabled`. The retained memory came
+>   mostly from transparent huge pages; qs now runs with THP off (`docs/deploy.md` sections 11 and 12).
 > - **Super+grave is `Super + code:49`** (the key under Esc by keycode; on the pt layout its keysym is
 >   backslash). Already reflected in section 6.
 > - **GPU row:** reads the AMD iGPU by default. An opt-in (`hl.env("RICE_NVIDIA", "1")`) starts one
