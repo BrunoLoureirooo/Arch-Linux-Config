@@ -1,8 +1,9 @@
-// Right-hand rail on the main screen (spec 5.3; render .rail): 22.5% of the screen
-// wide, from below the bar to the bottom, with its width reserved so tiled windows
-// stop at its left edge. A hot Chamfer (a1 -> a2 border, cut corners top-left and
-// bottom-right) holds the widgets in one column. shell.qml creates it only for the
-// main screen.
+// Right-hand rail (spec 5.3; render .rail): 22.5% of the screen wide, from below the
+// bar to the bottom, with its width reserved so tiled windows stop at its left edge. A
+// hot Chamfer (a1 -> a2 border, cut corners top-left and bottom-right) holds the
+// widgets in one column over the full height. shell.qml creates it only for
+// Screens.railScreen (the built-in eDP panel, else the main screen) and only while
+// Screens.railShown, so a hidden rail leaves no surface and no reserved zone.
 //
 // Exclusive zones and layer order: the compositor arranges layer surfaces one after
 // another, each inside the area the earlier ones left. A rail with its own zone on the
@@ -11,9 +12,9 @@
 // the rig). So the visible rail ignores zones (always exactly below the bar, never
 // shortens it), and a separate 1 px transparent, input-less surface on the overlay
 // layer, which is arranged after the top layer, reserves the width.
-// Deploy note: that overlay surface sits above fullscreen windows on the main monitor.
+// Deploy note: that overlay surface sits above fullscreen windows on the rail's monitor.
 // It is 1 px, transparent and takes no input, but if render:direct_scanout is enabled
-// in Hyprland, any overlay-layer surface may keep a fullscreen window on the main
+// in Hyprland, any overlay-layer surface may keep a fullscreen window on that
 // monitor from being scanned out directly (the other monitor is unaffected).
 import QtQuick
 import QtQuick.Layouts
@@ -62,13 +63,22 @@ PanelWindow {
             anchors.rightMargin: Math.round(rail.px * 0.8)
             clip: true
 
+            // Full height in two groups: the clock and SYS at the top, MEDIA, BLUETOOTH
+            // and CLAUDE at the bottom edge. The spare height is shared between the SYS
+            // network graph (it grows, up to 40% of the rail's height) and the one gap between the groups.
             ColumnLayout {
                 id: column
-                anchors { top: parent.top; left: parent.left; right: parent.right }
+                anchors.fill: parent
                 spacing: Math.round(rail.px * 0.5)
 
                 ClockWidget { Layout.fillWidth: true; px: rail.px }
-                SysWidget { Layout.fillWidth: true; px: rail.px }
+                SysWidget {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    px: rail.px
+                    sparkMax: Math.round(rail.height * 0.4)
+                }
+                Item { Layout.fillHeight: true }
                 MediaWidget { Layout.fillWidth: true; px: rail.px }
                 BluetoothWidget { Layout.fillWidth: true; px: rail.px }
                 ClaudeWidget { Layout.fillWidth: true; px: rail.px }

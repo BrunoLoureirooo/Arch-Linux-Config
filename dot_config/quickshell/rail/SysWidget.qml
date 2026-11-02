@@ -13,6 +13,9 @@ ColumnLayout {
     id: root
 
     property real px: Theme.px
+    // Tallest the sparkline grows to when the rail gives this section spare height
+    // (Layout.fillHeight); at its natural size it is the render's 1.5em.
+    property real sparkMax: Math.round(px * 1.5)
     readonly property bool vram: Stats.gpuSource === "nvidia"
     // Value column, the same for every row so the bars line up: wide enough for the
     // VRM text while that row is shown.
@@ -121,6 +124,8 @@ ColumnLayout {
         id: spark
         Layout.fillWidth: true
         Layout.topMargin: Math.round(root.px * 0.2)
+        Layout.fillHeight: true
+        Layout.maximumHeight: Math.max(implicitHeight, root.sparkMax)
         implicitHeight: Math.round(root.px * 1.5)
 
         readonly property var samples: Stats.netHistory

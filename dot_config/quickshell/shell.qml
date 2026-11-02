@@ -12,8 +12,10 @@
 // Each area adds one line or one Variants block below.
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import qs.bar
 import qs.fx
+import qs.hud
 import qs.launcher
 import qs.notifications
 import qs.rail
@@ -41,19 +43,48 @@ ShellRoot {
         }
     }
 
-    // The rail exists only on the main screen: one LazyLoader per screen, active
-    // only for Screens.isMain, so no rail window or widget exists anywhere else.
+    // The rail exists only on the rail screen (Screens.railScreen: the built-in eDP
+    // panel, else the main screen) and only while Screens.railShown: one LazyLoader per
+    // screen, so no rail window, zone or widget exists anywhere else or while hidden.
     Variants {
         model: Quickshell.screens
 
         LazyLoader {
             id: railLoader
             required property var modelData
-            active: Screens.isMain(modelData)
+            active: Screens.railShown && Screens.isRail(modelData)
 
             Rail {
                 screen: railLoader.modelData
             }
+        }
+    }
+
+    // qs ipc call rail toggle|show|hide|status (state in memory only, starts shown).
+    IpcHandler {
+        target: "rail"
+
+        function toggle(): void {
+            Screens.railShown = !Screens.railShown;
+        }
+        function show(): void {
+            Screens.railShown = true;
+        }
+        function hide(): void {
+            Screens.railShown = false;
+        }
+        function status(): string {
+            return (Screens.railShown ? "shown" : "hidden") + " " + (Screens.railScreen ? Screens.railScreen.name : "none");
+        }
+    }
+
+    // The empty-workspace clock HUD, one per screen (only while its workspace is empty).
+    Variants {
+        model: Quickshell.screens
+
+        CentreClock {
+            required property var modelData
+            screen: modelData
         }
     }
 
