@@ -63,6 +63,10 @@ end
 for n = 1, 5 do
     hl.bind("CTRL + " .. n, function() M.focus_slot(n) end, { description = "focus slot " .. n .. " on this screen" })
     hl.bind("CTRL + SHIFT + " .. n, function() M.move_to_slot(n) end, { description = "move window to slot " .. n })
+    -- Same actions on Super (the owner's old habit). xremap must never remap Super+digits
+    -- (tests/test_keymap_collisions.py), so Cmd+number does not switch browser tabs.
+    hl.bind("SUPER + " .. n, function() M.focus_slot(n) end, { description = "focus slot " .. n .. " on this screen" })
+    hl.bind("SUPER + SHIFT + " .. n, function() M.move_to_slot(n) end, { description = "move window to slot " .. n })
 end
 hl.bind("CTRL + ALT + left", function() M.step(-1) end, { description = "previous slot" })
 hl.bind("CTRL + ALT + right", function() M.step(1) end, { description = "next slot" })
@@ -87,6 +91,7 @@ hl.bind("SUPER + SPACE", hl.dsp.exec_cmd("qs ipc call launcher toggle"), { descr
 hl.bind("SUPER + Q", hl.dsp.window.close())
 hl.bind("SUPER + CTRL + F", hl.dsp.window.fullscreen({ action = "toggle" }))
 hl.bind("SUPER + ALT + SPACE", hl.dsp.window.float({ action = "toggle" }))
+hl.bind("SUPER + ALT + R", hl.dsp.exec_cmd("qs ipc call rail toggle"), { description = "rail toggle" })
 
 local jb = "/home/vyrus-extreme/.local/share/JetBrains/Toolbox/scripts/"
 local apps = { T = "kitty", F = "firefox", C = "code", E = "kitty -e yazi", R = jb .. "rider", I = jb .. "idea" }

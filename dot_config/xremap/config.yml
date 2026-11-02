@@ -3,7 +3,10 @@
 # exact_match is on so Super+Shift+T is not also caught by the Super+T rule, and
 # Alt+Shift+Left is not caught by Alt+Left.
 # Keep every entry a flat "Key: Value" line: tests/test_keymap_collisions.py
-# parses this file to check that no Hyprland bind equals an output below.
+# parses this file to check that no Hyprland bind equals an output below, and
+# that no input below is also a Hyprland bind (Hyprland wins). So Super+1..5 and
+# Super+Shift+1..5 are never remapped: they are workspace jumps, and Cmd+number
+# does not switch browser tabs.
 keymap:
   - name: Super letters to Ctrl
     application:

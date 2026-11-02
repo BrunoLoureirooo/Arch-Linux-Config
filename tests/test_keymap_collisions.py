@@ -105,6 +105,10 @@ def parse_xremap_outputs(path=XREMAP_CFG):
     return {normalize_xremap(out) for b in _keymap_blocks(path) for _, out in _remap_pairs(b)}
 
 
+def parse_xremap_inputs(path=XREMAP_CFG):
+    return {normalize_xremap(inp) for b in _keymap_blocks(path) for inp, _ in _remap_pairs(b)}
+
+
 def find_collisions(binds, outputs):
     return sorted(set(binds) & set(outputs))
 
@@ -157,6 +161,38 @@ class KeymapCollisionTest(unittest.TestCase):
                 f.write(src)
             self.assertEqual(
                 find_collisions(parse_binds(path), parse_xremap_outputs()), ["CTRL+LEFT"])
+
+    def test_no_input_collisions(self):
+        # A combination both xremap and Hyprland claim is ambiguous (it could fire
+        # twice, or xremap could swallow it). Hyprland wins: e.g. Super+1..5 are
+        # workspace jumps, so xremap must not remap them (to Ctrl+N for tabs).
+        self.assertEqual(find_collisions(parse_binds(), parse_xremap_inputs()), [])
+
+    def test_hyprland_owns_super_digits_and_rail_key(self):
+        binds = parse_binds()
+        for n in range(1, 6):
+            self.assertIn(f"SUPER+{n}", binds)
+            self.assertIn(f"SHIFT+SUPER+{n}", binds)
+            self.assertIn(f"CTRL+{n}", binds)
+            self.assertIn(f"CTRL+SHIFT+{n}", binds)
+        self.assertIn("ALT+SUPER+R", binds)
+
+    def test_collision_machinery_reports_a_remapped_super_digit(self):
+        # Re-adding "Super-1: Ctrl-1" (Cmd+number for browser tabs) to a copy of the
+        # xremap config must be caught as an input AND an output collision.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "config.yml")
+            with open(XREMAP_CFG, encoding="utf-8") as f:
+                src = f.read()
+            src = src.replace("      Super-t: Ctrl-t\n", "      Super-t: Ctrl-t\n      Super-1: Ctrl-1\n"
+                              "      Super-Shift-2: Ctrl-Shift-2\n")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(src)
+            binds = parse_binds()
+            self.assertEqual(find_collisions(binds, parse_xremap_inputs(path)),
+                             ["SHIFT+SUPER+2", "SUPER+1"])
+            self.assertEqual(find_collisions(binds, parse_xremap_outputs(path)),
+                             ["CTRL+1", "CTRL+SHIFT+2"])
 
     def test_exact_match_everywhere(self):
         blocks = _keymap_blocks()

@@ -6,8 +6,9 @@ package.path = "dot_config/hypr/?.lua;" .. package.path
 local active -- what hl.get_active_monitor() returns
 local workspaces -- what hl.get_workspaces() returns
 local dispatched = {}
+local binds = {} -- key string -> { action = function or dispatcher, opts = table }
 hl = {
-    bind = function() end,
+    bind = function(k, action, opts) binds[k] = { action = action, opts = opts or {} } end,
     dispatch = function(d) dispatched[#dispatched + 1] = d end,
     get_active_monitor = function() return active end,
     get_monitor = function() return active end,
@@ -72,5 +73,46 @@ assert(#dispatched == 2 and dispatched[2].focus.workspace == 13, "hop 3 -> 13")
 active.active_workspace = { id = 6 } -- not a pool slot: hops from the monitor's own pool, slot 1
 no_error("hop_pool(1) from a non-slot workspace", M.hop_pool, 1)
 assert(#dispatched == 3 and dispatched[3].focus.workspace == 1, "hop 6 -> 1")
+
+-- 4. Super+1..5 / Super+Shift+1..5 do what Ctrl+1..5 / Ctrl+Shift+1..5 do (the
+-- focused screen's own pool) and survive no monitor; Super+Alt+R toggles the rail.
+local function press(k)
+    local b = binds[k]
+    assert(b, "no bind for " .. k)
+    assert(type(b.action) == "function", k .. " must run a function, got " .. type(b.action))
+    b.action()
+end
+local panel = { name = "eDP-1", description = "", active_workspace = nil }
+local benq_active = { name = "DP-1", description = "BNQ BenQ EX2510S K8M02386019", active_workspace = { id = 2 } }
+for n = 1, 5 do
+    for _, case in ipairs({ { "SUPER + " .. n, "CTRL + " .. n, "focus" },
+                            { "SUPER + SHIFT + " .. n, "CTRL + SHIFT + " .. n, "move" } }) do
+        local super, ctrl, kind = case[1], case[2], case[3]
+        local function target(d) return d[kind] and d[kind].workspace end
+        dispatched = {}
+        active = nil
+        no_error(super .. " without a monitor", press, super)
+        assert(#dispatched == 0, super .. ": no dispatch without a monitor")
+        active = panel
+        no_error(super .. " on the panel without a workspace", press, super)
+        active = benq_active
+        no_error(super .. " on the BenQ", press, super)
+        assert(#dispatched == 2, super .. ": one dispatch per press, got " .. #dispatched)
+        assert(target(dispatched[1]) == 10 + n, super .. " on eDP-1 -> " .. (10 + n))
+        assert(target(dispatched[2]) == n, super .. " on the BenQ -> " .. n)
+        local s1, s2 = target(dispatched[1]), target(dispatched[2])
+        dispatched = {}
+        active = panel
+        press(ctrl)
+        active = benq_active
+        press(ctrl)
+        assert(target(dispatched[1]) == s1 and target(dispatched[2]) == s2, super .. " acts like " .. ctrl)
+    end
+end
+local rail = binds["SUPER + ALT + R"]
+assert(rail, "no SUPER + ALT + R bind")
+assert(type(rail.action) == "table" and rail.action.exec == "qs ipc call rail toggle",
+    "SUPER + ALT + R must exec 'qs ipc call rail toggle'")
+assert(rail.opts.description == "rail toggle", "SUPER + ALT + R description")
 
 print("ok")
