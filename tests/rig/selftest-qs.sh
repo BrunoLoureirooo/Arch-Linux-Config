@@ -38,6 +38,11 @@
 #      01:00 WET) and a big jump within one 2 s tick, the log stays quiet; a window title,
 #      MPRIS title/artist and a Bluetooth name holding <b>, <br> and <img src=http://...>
 #      render as literal plain text and no HTTP request reaches a local listener.
+#  13. Workspace-switch glitch (through tests/rig/glitch.qml, then the production shell):
+#      nothing at rest, one play per switch on that screen only for binds, step and plain
+#      dispatches, 42 ms steps, an Overlay surface that tears two kitties and is gone
+#      afterwards, click and keys through it, the off flag (ipc and by hand), memory kept
+#      after 20 plays, a quiet log.
 # Every qs this script starts runs on a private session bus (qs-run.sh starts its own
 # when none is given), so the shell's NotificationServer never meets the live mako.
 # Needs no running rig (starts and stops its own). Screenshots land in
@@ -57,6 +62,7 @@ fail() { echo "FAIL $*"; fails=$((fails + 1)); }
 
 sup_pid=""
 kitty_pid=""
+kitty2_pid=""
 fake_pid=""
 bus_pid=""
 sup_bus_pid=""
@@ -67,6 +73,7 @@ cleanup() {
     [[ -z "$holder_pid" ]] || kill -TERM "$holder_pid" 2>/dev/null || true
     [[ -z "$sup_pid" ]] || kill -TERM "$sup_pid" 2>/dev/null || true
     [[ -z "$kitty_pid" ]] || kill -TERM "$kitty_pid" 2>/dev/null || true
+    [[ -z "$kitty2_pid" ]] || kill -TERM "$kitty2_pid" 2>/dev/null || true
     [[ -z "$fake_pid" ]] || kill -TERM "$fake_pid" 2>/dev/null || true
     "$R/qs-run.sh" stop >/dev/null 2>&1 || true
     "$R/nested-hypr.sh" stop >/dev/null 2>&1 || true
@@ -95,7 +102,8 @@ for f in .config/quickshell/shell.qml .config/quickshell/Theme.qml .config/quick
     .config/quickshell/rail/Rail.qml .config/quickshell/rail/ClockWidget.qml \
     .config/quickshell/rail/SysWidget.qml .config/quickshell/rail/MediaWidget.qml \
     .config/quickshell/rail/SectionLabel.qml .config/quickshell/notifications/Toasts.qml \
-    .config/quickshell/launcher/Launcher.qml \
+    .config/quickshell/launcher/Launcher.qml .config/quickshell/fx/Glitch.qml \
+    .config/quickshell/fx/glitch.frag.qsb \
     .local/share/rice/palette.py; do
     [[ -s "$st/$f" ]] || { ok=0; echo "  missing $f"; }
 done
@@ -221,6 +229,8 @@ first=$(qs_child || true)
 if [[ -z "$first" ]]; then
     fail "qs-supervise started no qs child"
 else
+    [[ "$(awk '/^THP_enabled/{print $2}' "/proc/$first/status")" == 0 ]] \
+        && pass "qs-supervise's qs runs with transparent huge pages off" || fail "qs-supervise's qs has THP on"
     sleep 2
     t0=$(date +%s.%N)
     kill -TERM "$first"
@@ -2038,6 +2048,231 @@ kill -TERM "$kitty_pid" 2>/dev/null || true; wait "$kitty_pid" 2>/dev/null || tr
 kill -TERM "$lst_pid" 2>/dev/null || true; wait "$lst_pid" 2>/dev/null || true; lst_pid=""
 sleep 1
 [[ -z "$(warns_since "$n0")" ]] && pass "qs log: no ERROR/WARN in section 12" || { fail "qs log section 12"; warns_since "$n0"; }
+"$R/qs-run.sh" stop >/dev/null
+
+# --- 13. Workspace-switch glitch (fx/Glitch.qml) ---------------------------------------
+# a-f through tests/rig/glitch.qml (the production component with every step logged), g
+# with the production shell.qml. qs runs with transparent huge pages off, as
+# qs-supervise starts it in production (the memory numbers depend on it).
+nothp() { python3 -I -c 'import ctypes, os, sys
+ctypes.CDLL(None).prctl(41, 1, 0, 0, 0)  # PR_SET_THP_DISABLE, inherited by qs
+os.execvp(sys.argv[1], sys.argv[1:])' "$@"; }
+"$R/nested-hypr.sh" stop >/dev/null
+"$R/nested-hypr.sh" start "$R/full.lua" >/dev/null
+gstart() { # gstart <step ms> [entry]: (re)start qs on the probe (or production) config
+    "$R/qs-run.sh" stop >/dev/null
+    RIG_GLITCH_STEP_MS="$1" RIG_GLITCH_SEED=7 nothp "$R/qs-run.sh" start ${2:+--entry "$2"} >/dev/null
+    qs_pid=$("$R/qs-run.sh" status | sed -n 's/^running: pid=\([0-9]*\) .*/\1/p')
+    sleep 1.5
+}
+staged="$TB/staged/home"
+flagf="$staged/.local/state/quickshell/glitch-disabled"
+rm -f -- "$flagf"
+gstart 42 "$R/glitch.qml"
+[[ "$("$R/qs-run.sh" home)" == "$staged" ]] || fail "staged HOME is not $staged"
+[[ "$(awk '/^THP_enabled/{print $2}' "/proc/$qs_pid/status")" == 0 ]] \
+    && pass "glitch qs runs with THP off (as under qs-supervise)" || fail "THP still on for the rig qs"
+glayers() { H layers | grep -c 'namespace: rice-glitch' || true; }
+gsince() { "$R/qs-run.sh" log | tail -n +"$(($1 + 1))"; }
+gplays() { gsince "$1" | grep -c "glitch end screen ${2:-}" || true; }
+gws() { H dispatch "hl.dsp.focus({ workspace = $1 })" >/dev/null; }
+n0=$(logn)
+
+# a. At rest: no overlay surface, no child process.
+[[ "$(glayers)" == 0 && -z "$(pgrep -P "$qs_pid" || true)" ]] \
+    && pass "glitch at rest: no rice-glitch layer, no child process" || fail "glitch at rest: $(glayers) layers"
+
+# b. Two kitties on DP-1 ws 6 (A left, B right, B focused), each copying its input to a
+#    file; A prints coloured lines so the tear has something to tear. No session bus for
+#    them: qs-run.sh's private bus goes away with every qs restart below, and kitty exits
+#    when its bus does.
+kenv=(env HOME="$staged" XDG_CONFIG_HOME="$staged/.config" XDG_CACHE_HOME="$staged/.cache"
+    XDG_STATE_HOME="$staged/.local/state" XDG_DATA_HOME="$staged/.local/share" DBUS_SESSION_BUS_ADDRESS="unix:path=$tmp/no-bus")
+H dispatch 'hl.dsp.focus({ monitor = "DP-1" })' >/dev/null
+gws 6
+: >"$tmp/g13-A"; : >"$tmp/g13-B"
+"$R/run.sh" "${kenv[@]}" kitty --config=NONE --title rig-gA sh -c \
+    'for i in $(seq 40); do printf "\033[3%dm line %02d the quick brown fox jumps over the lazy dog\033[0m\n" $((i % 7 + 1)) $i; done; exec cat >"$1"' \
+    sh "$tmp/g13-A" >"$tmp/kitty13a.out" 2>&1 </dev/null &
+kitty_pid=$!
+sleep 1.5
+"$R/run.sh" "${kenv[@]}" kitty --config=NONE --title rig-gB sh -c 'exec cat >"$1"' sh "$tmp/g13-B" \
+    >"$tmp/kitty13b.out" 2>&1 </dev/null &
+kitty2_pid=$!
+geoA=""
+for _ in $(seq 30); do
+    sleep 0.3
+    geoA=$(H clients -j | python3 -I -c '
+import json, sys
+cs = {c["title"]: c for c in json.load(sys.stdin)}
+if "rig-gA" in cs and "rig-gB" in cs:
+    a = cs["rig-gA"]
+    print(a["at"][0] + a["size"][0] // 2, a["at"][1] + a["size"][1] // 2, cs["rig-gB"]["address"])')
+    [[ -n "$geoA" ]] && break
+done
+read -r ax ay baddr <<<"${geoA:-0 0 none}"
+active_title() { H activewindow -j | spy "d.get('title', '')"; }
+[[ "$baddr" != none && "$(active_title)" == rig-gB ]] && pass "two kitties on DP-1 ws 6, B focused" \
+    || fail "kitties not up ($geoA, active '$(active_title)')"
+sleep 0.5
+
+# c. Ten switches on DP-1 by every route: number binds, the step bind, plain dispatches
+#    (as the bar's click and any script would). Each one plays once, on DP-1 only, with
+#    three steps 42 ms apart; the overlay is gone after each play.
+n1=$(logn)
+seq13=(k1 k2 kR d6 k1 d6 k2 kR d6 k1)
+left=0
+for s in "${seq13[@]}"; do
+    case "$s" in
+        k1) "$R/keys.sh" -M ctrl -k 1 -m ctrl ;;
+        k2) "$R/keys.sh" -M ctrl -k 2 -m ctrl ;;
+        kR) "$R/keys.sh" -M ctrl -M alt -k Right -m alt -m ctrl ;;
+        d6) gws 6 ;;
+    esac
+    sleep 0.6
+    left=$((left + $(glayers)))
+done
+np=$(gplays "$n1" DP-1)
+ne=$(gplays "$n1" eDP-1)
+gsince "$n1" | python3 -I -c '
+import re, sys
+plays, cap, cur = [], [], None
+for line in sys.stdin:
+    m = re.search(r"glitch capture screen \S+ ms (\d+)", line)
+    if m:
+        cap.append(int(m.group(1)))
+    m = re.search(r"glitch (step \d+|end) screen \S+ t (\d+)", line)
+    if m:
+        t = int(m.group(2))
+        if m.group(1) == "step 3":
+            cur = [t]
+            plays.append(cur)
+        elif cur is not None:
+            cur.append(t)
+iv = [b - a for p in plays for a, b in zip(p, p[1:])]
+print(len(iv), min(iv, default=-1), max(iv, default=-1), round(sum(iv) / max(len(iv), 1), 1),
+      min(cap, default=-1), max(cap, default=-1), sum(1 for p in plays if len(p) == 4))' >"$tmp/g13-iv"
+read -r niv ivmin ivmax ivmean capmin capmax full <"$tmp/g13-iv"
+echo "  10 switches: $np plays on DP-1, $ne on eDP-1; $niv step intervals min $ivmin max $ivmax mean $ivmean ms; capture ready ${capmin}-${capmax} ms after the change"
+[[ "$np" == 10 && "$ne" == 0 && "$full" == 10 ]] && pass "every switch (binds, step, dispatch) played once on DP-1 only" \
+    || fail "plays: DP-1 $np (complete $full), eDP-1 $ne"
+[[ "$niv" == 30 && "$ivmin" -ge 22 && "$ivmax" -le 62 ]] && pass "step intervals within 42 +/- 20 ms ($ivmin..$ivmax, mean $ivmean)" \
+    || fail "step intervals: n=$niv $ivmin..$ivmax"
+[[ "$left" == 0 && "$(glayers)" == 0 ]] && pass "no glitch layer left 0.6 s after any switch" || fail "layers left: $left"
+H dispatch 'hl.dsp.focus({ monitor = "eDP-1" })' >/dev/null
+n2=$(logn)
+"$R/keys.sh" -M ctrl -M alt -k Right -m alt -m ctrl
+sleep 0.8
+[[ "$(gplays "$n2" eDP-1)" == 1 && "$(gplays "$n2" DP-1)" == 0 ]] && pass "a switch on eDP-1 plays on eDP-1 only" \
+    || fail "eDP-1 switch: $(gplays "$n2" eDP-1) / DP-1 $(gplays "$n2" DP-1)"
+H dispatch 'hl.dsp.focus({ monitor = "DP-1" })' >/dev/null
+
+# d. Frozen steps (1.5 s each): the overlay is on the Overlay layer above the kitties and
+#    visibly tears them; afterwards the screen is clean again.
+gws 21; sleep 0.3
+gstart 1500 "$R/glitch.qml"
+gws 6; sleep 5.5   # this switch plays too; let it end before the clean shot
+H dispatch "hl.dsp.focus({ window = \"address:$baddr\" })" >/dev/null
+sleep 0.5
+kws=$(H clients -j | spy "sorted((c['title'], c['workspace']['id']) for c in d if c['title'].startswith('rig-g'))")
+[[ "$kws" == "[('rig-gA', 6), ('rig-gB', 6)]" && "$(active_ws DP-1)" == 6 ]] \
+    && pass "both kitties still on DP-1's visible ws 6 after the qs restarts" || fail "kitties for the shot: $kws, DP-1 on $(active_ws DP-1)"
+"$R/run.sh" grim -t ppm -o DP-1 "$tmp/g13-clean.ppm"
+gws 21; sleep 5.5; gws 6
+sleep 0.8
+"$R/run.sh" grim -t ppm -o DP-1 "$tmp/g13-mid.ppm"
+"$R/shot.sh" DP-1 "$SHOTS/qs-glitch-mid-DP-1.png" >/dev/null
+lvl=$(H layers -j | python3 -I -c '
+import json, sys
+d = json.load(sys.stdin)
+print(" ".join(f"{mon}:{lv}" for mon, m in d.items() for lv, ls in m["levels"].items() for l in ls if l["namespace"] == "rice-glitch"))')
+sleep 4.5
+"$R/run.sh" grim -t ppm -o DP-1 "$tmp/g13-after.ppm"
+"$R/shot.sh" DP-1 "$SHOTS/qs-glitch-after-DP-1.png" >/dev/null
+pdiff() { python3 -I -c '
+import sys
+def px(p):
+    b = open(p, "rb").read()
+    parts = b.split(b"\n", 3)
+    return parts[3]
+a, b = px(sys.argv[1]), px(sys.argv[2])
+n = len(a) // 3
+print(round(100 * sum(1 for i in range(0, len(a), 3) if a[i:i + 3] != b[i:i + 3]) / n, 2))' "$1" "$2"; }
+dmid=$(pdiff "$tmp/g13-clean.ppm" "$tmp/g13-mid.ppm")
+daft=$(pdiff "$tmp/g13-clean.ppm" "$tmp/g13-after.ppm")
+echo "  overlay level: '$lvl'; pixels changed mid-effect ${dmid}%, after ${daft}%"
+[[ "$lvl" == "DP-1:3" ]] && pass "mid-effect: one rice-glitch surface, on DP-1's Overlay layer (level 3)" || fail "overlay layer: '$lvl'"
+(($(echo "$dmid > 20" | bc))) && (($(echo "$daft < 1" | bc))) \
+    && pass "the tear covers the kitties (${dmid}% of pixels changed) and leaves nothing behind (${daft}%)" \
+    || fail "tear pixels: mid ${dmid}% after ${daft}%"
+[[ "$(glayers)" == 0 ]] && pass "frozen play ended: no glitch layer" || fail "frozen play left a layer"
+
+# e. Click-through: with the overlay up, a click on kitty A focuses A and the typed keys
+#    land in A (wtype loses the first key of a run, hence the leading x).
+gws 21; sleep 0.3; gws 6
+sleep 0.5
+up=$(glayers)
+act0=$(active_title)
+"$R/run.sh" python3 -I "$R/vpointer.py" "$ax" "$ay" >/dev/null
+sleep 0.2
+"$R/keys.sh" xglitchok -k Return
+sleep 0.3
+up2=$(glayers)
+act=$(active_title)
+sleep 4.5
+echo "  overlay up before/after the click: $up/$up2; active '$act0' -> click at $ax,$ay -> '$act'; A got '$(tr -d '\n' <"$tmp/g13-A")', B got '$(tr -d '\n' <"$tmp/g13-B")'"
+[[ "$up" == 1 && "$up2" == 1 && "$act" == rig-gA && "$(cat "$tmp/g13-A")" == *glitchok* && ! -s "$tmp/g13-B" ]] \
+    && pass "click-through: the click and the keys reached kitty A under the overlay" || fail "click-through"
+
+# f. Off switch: ipc disable writes the flag and no switch plays; enable removes it; a
+#    hand-made flag works at once.
+gstart 42 "$R/glitch.qml"
+"$R/qs-run.sh" ipc call glitch disable >/dev/null
+sleep 0.5
+[[ -e "$flagf" ]] && pass "ipc disable creates $flagf" || fail "ipc disable: no flag file"
+n4=$(logn); seen=0
+for w in 21 22 6; do gws "$w"; sleep 0.05; seen=$((seen + $(glayers))); sleep 0.4; done
+[[ "$(gplays "$n4")" == 0 && "$seen" == 0 && -z "$(pgrep -P "$qs_pid" || true)" ]] \
+    && pass "disabled: three switches, no play, no layer, no child process" || fail "disabled: $(gplays "$n4") plays, $seen layer samples"
+"$R/qs-run.sh" ipc call glitch enable >/dev/null
+sleep 0.5
+n5=$(logn); gws 21; sleep 0.6
+[[ ! -e "$flagf" && "$(gplays "$n5")" == 1 ]] && pass "ipc enable removes the flag; the next switch plays" \
+    || fail "enable: flag $([[ -e "$flagf" ]] && echo present || echo gone), $(gplays "$n5") plays"
+: >"$flagf"
+n6=$(logn); gws 6; sleep 0.6; gws 21; sleep 0.6
+p6=$(gplays "$n6")
+rm -f -- "$flagf"
+n7=$(logn); gws 6; sleep 0.6
+[[ "$p6" == 0 && "$(gplays "$n7")" == 1 ]] && pass "a hand-made flag file stops it at once; removing it brings it back" \
+    || fail "hand-made flag: $p6 plays while present, $(gplays "$n7") after removal"
+[[ -z "$(warns_since "$n0")" ]] && pass "qs log: no ERROR/WARN in section 13 a-f" || { fail "qs log section 13"; warns_since "$n0"; }
+
+# g. Memory, production shell.qml: 20 plays, then 30 s of rest. The retained growth must
+#    stay small (the spike kept ~+45 MB with THP on). Judged on PSS and anonymous memory:
+#    RSS also counts clean library pages the first play faults in (the shader compiler's
+#    share of libLLVM/libgallium), which the kernel can drop at any time.
+gws 21
+gstart 42 >/dev/null
+sleep 8
+mem() { awk '/^(Rss|Pss|Anonymous):/{printf "%s ", $2}' "/proc/$qs_pid/smaps_rollup"; }
+read -r r0 p0 a0 <<<"$(mem)"
+seen=0
+for i in $(seq 20); do gws $((i % 2 ? 22 : 21)); sleep 0.08; seen=$((seen + $(glayers))); sleep 0.5; done
+gws 21
+sleep 30
+read -r r1 p1 a1 <<<"$(mem)"
+[[ "$seen" -ge 18 ]] && pass "production shell: the overlay was up right after $seen of 20 switches" \
+    || fail "production shell: overlay seen after only $seen of 20 switches"
+echo "  production shell, 20 plays + 30 s:RSS $r0 -> $r1 kB ($(((r1 - r0) / 1024)) MB), PSS $p0 -> $p1 ($(((p1 - p0) / 1024)) MB), anon $a0 -> $a1 ($(((a1 - a0) / 1024)) MB)"
+[[ $((p1 - p0)) -lt 12288 && $((a1 - a0)) -lt 12288 && "$(glayers)" == 0 ]] \
+    && pass "20 plays retain < 12 MB PSS and anon after 30 s (no layer left)" || fail "glitch memory retention"
+bad=$("$R/qs-run.sh" log | grep -E 'ERROR|WARN' | grep -v -e 'host portal' \
+    -e 'QML Image at @wallpaper/Wallpaper.qml.*Cannot open: .*/Pictures/berserk-wallpaper.jpg$' || true)
+[[ -z "$bad" ]] && pass "production shell with Glitch: no ERROR/WARN besides the known two" || { fail "production log"; echo "$bad"; }
+kill -TERM "$kitty_pid" "$kitty2_pid" 2>/dev/null || true
+wait "$kitty_pid" "$kitty2_pid" 2>/dev/null || true
+kitty_pid=""; kitty2_pid=""
 "$R/qs-run.sh" stop >/dev/null
 
 "$R/nested-hypr.sh" stop >/dev/null

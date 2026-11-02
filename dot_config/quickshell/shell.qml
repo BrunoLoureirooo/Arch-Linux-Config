@@ -13,6 +13,7 @@
 import QtQuick
 import Quickshell
 import qs.bar
+import qs.fx
 import qs.launcher
 import qs.notifications
 import qs.rail
@@ -64,4 +65,8 @@ ShellRoot {
 
     // The wallpaper carousel overlay (qs ipc call carousel toggle).
     Carousel {}
+
+    // The workspace-switch tear on the screen whose workspace changed (on by default;
+    // qs ipc call glitch disable|enable).
+    Glitch {}
 }
