@@ -224,7 +224,7 @@ Everything lives in the chezmoi source repo and is deployed with `chezmoi apply`
 
 ## 6. Key map
 
-All window-manager binds use `Super`, `Ctrl+Alt` or `Ctrl` with a digit; none of them equals an xremap output.
+All window-manager binds use `Super`, `Ctrl+Alt` or `Ctrl` with a digit; none of them equals an xremap output, and no xremap input is also a Hyprland bind (Hyprland wins).
 
 **xremap outputs (GUI apps, not kitty):**
 
@@ -244,6 +244,7 @@ All window-manager binds use `Super`, `Ctrl+Alt` or `Ctrl` with a digit; none of
 |---|---|
 | Ctrl + 1..5 | focus slot on this screen's pool |
 | Ctrl + Shift + 1..5 | move window to slot on this screen's pool |
+| Super + 1..5, Super + Shift + 1..5 | same as Ctrl + 1..5 and Ctrl + Shift + 1..5 (added 2026-11-02; xremap never remaps them, so Cmd + number does not switch browser tabs) |
 | Ctrl + Alt + ← → and mouse side buttons | step previous/next slot on this screen |
 | Ctrl + Alt + ↑ ↓ | same slot in the next/previous pool present on this screen (reaches the workspaces a removed screen left here; no-op with one pool) |
 | Super + Alt + ←↑↓→ or h j k l | focus window |
@@ -254,6 +255,7 @@ All window-manager binds use `Super`, `Ctrl+Alt` or `Ctrl` with a digit; none of
 | Super + Q | close window |
 | Super + Ctrl + F | fullscreen |
 | Super + Alt + Space | toggle floating |
+| Super + Alt + R | show/hide the rail (`qs ipc call rail toggle`, added 2026-11-02) |
 | Ctrl + Alt + T / F / C / E / R / I | terminal, Firefox, VS Code, yazi, Rider, IntelliJ (the current Super+T/F/C/E/R/I launches) |
 | Ctrl + Alt + W | carousel |
 | Ctrl + Alt + Shift + Q | exit Hyprland (was Super+M) |

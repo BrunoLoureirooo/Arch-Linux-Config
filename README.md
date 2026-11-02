@@ -42,8 +42,9 @@ first: read [docs/deploy.md](docs/deploy.md) before running `chezmoi apply`.
 
 Mac-like scheme: Super is Command, Alt is Option, Control stays Control. All window-manager binds use
 `Super`, `Ctrl+Alt` or `Ctrl` with a digit; none of them equals a key combination the remapper outputs
-(a translated key press re-enters the compositor, so a bind on the same combination would fire on it;
-`tests/test_keymap_collisions.py` checks this).
+(a translated key press re-enters the compositor, so a bind on the same combination would fire on it),
+and the remapper never takes a combination Hyprland binds (Hyprland wins; `tests/test_keymap_collisions.py`
+checks both).
 
 **xremap outputs (GUI apps, not kitty):**
 
@@ -63,6 +64,7 @@ Mac-like scheme: Super is Command, Alt is Option, Control stays Control. All win
 |---|---|
 | Ctrl + 1..5 | focus slot on this screen's pool |
 | Ctrl + Shift + 1..5 | move window to slot on this screen's pool |
+| Super + 1..5, Super + Shift + 1..5 | same as Ctrl + 1..5 and Ctrl + Shift + 1..5 (xremap never remaps them, so Cmd + number does not switch browser tabs) |
 | Ctrl + Alt + ← → and mouse side buttons | step previous/next slot on this screen |
 | Ctrl + Alt + ↑ ↓ | same slot in the next/previous pool present on this screen (reaches the workspaces a removed screen left here; no-op with one pool) |
 | Super + Alt + ←↑↓→ or h j k l | focus window |
@@ -73,6 +75,7 @@ Mac-like scheme: Super is Command, Alt is Option, Control stays Control. All win
 | Super + Q | close window |
 | Super + Ctrl + F | fullscreen |
 | Super + Alt + Space | toggle floating |
+| Super + Alt + R | show/hide the rail (`qs ipc call rail toggle`) |
 | Ctrl + Alt + T / F / C / E / R / I | terminal, Firefox, VS Code, yazi, Rider, IntelliJ (the current Super+T/F/C/E/R/I launches) |
 | Ctrl + Alt + W | carousel |
 | Ctrl + Alt + Shift + Q | exit Hyprland (was Super+M) |

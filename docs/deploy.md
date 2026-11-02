@@ -294,7 +294,9 @@ Do these in order. Anything that fails: note it, and use section 13 if the deskt
    panel, independently: compare `hyprctl monitors -j` before and after a switch, the other screen's
    workspace must not change. Unplug the BenQ: its windows move onto the panel, none is lost, and they
    return when it is plugged back in. The lid-closed-with-no-external-screen case is covered only by a
-   stub test.
+   stub test. `Super+1..5` must do exactly what `Ctrl+1..5` does (and `Super+Shift+1..5` what
+   `Ctrl+Shift+1..5` does), on each screen, also with Firefox focused: there `Super+3` jumps workspace
+   and must NOT switch to tab 3 (xremap leaves Super+digits alone; Cmd+number for tabs is gone).
    **Moved pools.** While a screen is gone its pool lives on the other one: unplugging the BenQ moves 1-5
    onto the panel, closing the lid moves 11-15 onto the BenQ. `Ctrl+1..5`, `Ctrl+Alt+Left/Right` and the
    mouse side buttons only ever reach the focused screen's OWN pool, so the moved windows are out of their
@@ -307,7 +309,8 @@ Do these in order. Anything that fails: note it, and use section 13 if the deskt
    `~/.local/bin/lid close` for the other direction), hop, see the windows, plug back in.
 6. **Bar and rail on both screens.** A bar on the top of each screen showing its own five workspaces
    (active filled, occupied underlined; CPU, MEM, VOL, NET and BAT chips). The rail (clock, sys meters,
-   media, bluetooth, claude) only on the BenQ. Wallpaper on both screens (default image
+   media, bluetooth, claude) only on the BenQ. `Super+Alt+R` hides the rail and pressing it again
+   brings it back (in Firefox too: xremap's `Super+R` reload rule must not fire). Wallpaper on both screens (default image
    `~/Pictures/berserk-wallpaper.jpg`).
    **Glitch.** Every workspace change tears that screen for about 130 ms (displaced bands, red/cyan
    ghosts, corrupted blocks over the windows), whatever caused it: `Ctrl+1..5`, the step keys, the side
@@ -373,7 +376,10 @@ Do these in order. Anything that fails: note it, and use section 13 if the deskt
 All window-manager binds use `Super`, `Ctrl+Alt` or `Ctrl` with a digit; none of them equals an xremap
 output. **The collision rule:** the remapper re-injects its translated keys, which re-enter the
 compositor, so no Hyprland bind may equal any combination xremap emits (`Ctrl+Left` is emitted for word
-jump, so workspace stepping is `Ctrl+Alt+Left/Right`). `tests/test_keymap_collisions.py` enforces it.
+jump, so workspace stepping is `Ctrl+Alt+Left/Right`). The other direction too: xremap never takes a
+combination Hyprland binds, Hyprland wins. So `Super+1..5` / `Super+Shift+1..5` are workspace keys and
+are not remapped to `Ctrl+1..5`; the cost is that Cmd+number no longer switches browser tabs (and
+`Ctrl+1..5` is Hyprland's as well). `tests/test_keymap_collisions.py` enforces both.
 
 **xremap outputs (GUI apps, not kitty):**
 
@@ -393,6 +399,7 @@ jump, so workspace stepping is `Ctrl+Alt+Left/Right`). `tests/test_keymap_collis
 |---|---|
 | Ctrl + 1..5 | focus slot on this screen's pool |
 | Ctrl + Shift + 1..5 | move window to slot on this screen's pool |
+| Super + 1..5, Super + Shift + 1..5 | same as Ctrl + 1..5 and Ctrl + Shift + 1..5 (xremap never remaps them, so Cmd + number does not switch browser tabs) |
 | Ctrl + Alt + ← → and mouse side buttons | step previous/next slot on this screen |
 | Ctrl + Alt + ↑ ↓ | same slot in the next/previous pool present on this screen (reaches the workspaces a removed screen left here; no-op with one pool) |
 | Super + Alt + ←↑↓→ or h j k l | focus window |
@@ -403,6 +410,7 @@ jump, so workspace stepping is `Ctrl+Alt+Left/Right`). `tests/test_keymap_collis
 | Super + Q | close window |
 | Super + Ctrl + F | fullscreen |
 | Super + Alt + Space | toggle floating |
+| Super + Alt + R | show/hide the rail (`qs ipc call rail toggle`) |
 | Ctrl + Alt + T / F / C / E / R / I | terminal, Firefox, VS Code, yazi, Rider, IntelliJ (the current Super+T/F/C/E/R/I launches) |
 | Ctrl + Alt + W | carousel |
 | Ctrl + Alt + Shift + Q | exit Hyprland (was Super+M) |
