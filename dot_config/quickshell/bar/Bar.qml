@@ -1,8 +1,9 @@
 // Top bar, one per screen (spec 5.3; render classes .bar .mark .wsl .chip .m).
 // Left: λ tile, workspace slots, `//`, window title. Centre: clock and date.
-// Right: CPU, MEM, VOL, NET (default-route interface) chips, plus BAT whenever a
-// laptop battery exists: the same chips on every screen, so no screen topology (an
-// undocked laptop is the only, hence main, screen) can hide the battery.
+// Right: VOL, NET (default-route interface) chips, plus BAT whenever a laptop battery
+// exists: the same chips on every screen, so no screen topology (an undocked laptop is
+// the only, hence main, screen) can hide the battery. CPU and MEM are shown only in the
+// rail's SYS rows (not repeated here).
 // Everything is read only (no volume or power changes).
 import QtQuick
 import Quickshell
@@ -140,21 +141,6 @@ PanelWindow {
     Row {
         anchors { right: parent.right; rightMargin: Math.round(bar.px * 0.7); verticalCenter: parent.verticalCenter }
         spacing: bar.gap
-
-        Chip {
-            anchors.verticalCenter: parent.verticalCenter
-            px: bar.px
-            label: "CPU"
-            meter: Stats.cpu
-            text: Math.round(Stats.cpu) + "%"
-        }
-
-        Chip {
-            anchors.verticalCenter: parent.verticalCenter
-            px: bar.px
-            label: "MEM"
-            text: Stats.memGb.toFixed(1) + "G"
-        }
 
         Chip {
             anchors.verticalCenter: parent.verticalCenter
