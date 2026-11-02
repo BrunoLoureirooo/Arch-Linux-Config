@@ -1786,7 +1786,7 @@ fallback_ok="d['gpuSource'] == '$want_src_fallback' and d['vramPct'] == -1 and (
 [[ "$(nvj "$fallback_ok")" == True && $dt -ge 5 && $dt -le 10 && -z "$(alive_fakes)" ]] \
     && pass "no valid line: $want_src_fallback after ${dt} s (6 s timeout on the 2 s tick), the fake was stopped" \
     || fail "timeout: ${dt}s $(nvj d) alive: $(alive_fakes)"
-[[ "$(nvj "[(r['label'], r['visible']) for r in d['rows']][2:4]")" =="[('GPU', $([[ -n "$amd11" ]] && echo True || echo False)), ('VRM', False)]" ]] \
+[[ "$(nvj "[(r['label'], r['visible']) for r in d['rows']][2:4]")" == "[('GPU', $([[ -n "$amd11" ]] && echo True || echo False)), ('VRM', False)]" ]] \
     && pass "after the timeout: VRM row hidden, GPU row $([[ -n "$amd11" ]] && echo "from AMD" || echo hidden)" \
     || fail "timeout rows: $(nvj "$rows")"
 sleep 6
