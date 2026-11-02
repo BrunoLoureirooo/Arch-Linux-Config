@@ -1739,7 +1739,7 @@ got=$("$R/qs-run.sh" ipc call nv parse)
 
 # b. Normal stream: the fake's values reach Stats and the rail, one process.
 nv_wait 8 "d['gpuSource'] == 'nvidia'" || fail "normal: gpuSource never became nvidia ($(nvj d))"
-rows="[(r['label'], r['visible'], r['text'], r['lit']) for r in d['rows']]"
+rows="[(r['label'], r['visible'], r['text'], r['lit']) for r in d['rows'] if r['label'] != 'TMP']"
 [[ "$(nvj "(d['gpu'], d['vramUsedMb'], d['vramTotalMb'], d['vramPct'], d['nvState'])")" == "(42, 1536, 4096, 37.5, 'live')" ]] \
     && pass "normal stream: gpuSource nvidia, gpu 42, VRAM 1536/4096 MiB (37.5%) as the fake prints" \
     || fail "normal values: $(nvj d)"
@@ -1786,7 +1786,7 @@ fallback_ok="d['gpuSource'] == '$want_src_fallback' and d['vramPct'] == -1 and (
 [[ "$(nvj "$fallback_ok")" == True && $dt -ge 5 && $dt -le 10 && -z "$(alive_fakes)" ]] \
     && pass "no valid line: $want_src_fallback after ${dt} s (6 s timeout on the 2 s tick), the fake was stopped" \
     || fail "timeout: ${dt}s $(nvj d) alive: $(alive_fakes)"
-[[ "$(nvj "[(r['label'], r['visible']) for r in d['rows']][2:]")" == "[('GPU', $([[ -n "$amd11" ]] && echo True || echo False)), ('VRM', False)]" ]] \
+[[ "$(nvj "[(r['label'], r['visible']) for r in d['rows']][2:4]")" =="[('GPU', $([[ -n "$amd11" ]] && echo True || echo False)), ('VRM', False)]" ]] \
     && pass "after the timeout: VRM row hidden, GPU row $([[ -n "$amd11" ]] && echo "from AMD" || echo hidden)" \
     || fail "timeout rows: $(nvj "$rows")"
 sleep 6

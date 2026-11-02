@@ -1,5 +1,6 @@
-// Rail SYS section (render .row3 .sg .spw .netl): CPU, MEM, GPU rows as
-// `LABEL [10 segments] value` (GPU hidden when Stats has no GPU source or no value),
+// Rail SYS section (render .row3 .sg .spw .netl): CPU, MEM, GPU, TMP rows as
+// `LABEL [10 segments] value` (GPU hidden when Stats has no GPU source or no value;
+// TMP is the CPU temperature, bar 30-100 °C, warn from 85 °C, `--` when unknown),
 // plus a VRM row (`1.0/4.0G`) while the GPU source is the NVIDIA stream; then the
 // network sparkline over Stats.netHistory (one polyline over a faint a1 area, a2 end
 // dot, scaled to the window's maximum) and the caption `up <rate>  <iface>  down <rate>`.
@@ -50,6 +51,8 @@ ColumnLayout {
         property string label
         property real value: 0   // 0-100
         property string text
+        property bool warn: value > 75
+        property bool known: true
         Layout.fillWidth: true
         spacing: Math.round(root.px * 0.5)
 
@@ -78,7 +81,7 @@ ColumnLayout {
                     x: Math.round(index * (segs.cell + 1))
                     width: Math.round((index + 1) * (segs.cell + 1) - 1) - x
                     height: segs.height
-                    color: index < segs.lit ? (row.value > 75 ? Theme.warn : Theme.a1) : Theme.line
+                    color: index < segs.lit ? (row.warn ? Theme.warn : Theme.a1) : Theme.line
                 }
             }
         }
@@ -87,7 +90,7 @@ ColumnLayout {
             Layout.preferredWidth: root.valueWidth
             horizontalAlignment: Text.AlignRight
             text: row.text
-            color: Theme.fg
+            color: row.known ? Theme.fg : Theme.dim
             font.family: Theme.font
             font.pixelSize: root.px
         }
@@ -117,6 +120,15 @@ ColumnLayout {
         label: "VRM"
         value: Math.max(0, Stats.vramPct)
         text: root.vramText(Stats.vramUsedMb, Stats.vramTotalMb)
+    }
+
+    StatRow {
+        readonly property real temp: Stats.cpuTempC
+        label: "TMP"
+        known: temp >= 0
+        value: known ? (Math.min(100, Math.max(30, temp)) - 30) / 70 * 100 : 0
+        warn: temp >= 85
+        text: known ? Math.round(temp) + "C" : "--"
     }
 
     // Sparkline. Points are recomputed only when netHistory changes (every 2 s).

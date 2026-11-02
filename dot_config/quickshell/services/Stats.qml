@@ -1,7 +1,8 @@
 pragma Singleton
 // System stats for the bar and rail (spec 5.3). One shared 2 s timer re-reads
 // /proc/stat, /proc/meminfo, /proc/net/route, /proc/net/dev and the AMD GPU's
-// gpu_busy_percent through FileViews. netConn is the interface of the default route
+// gpu_busy_percent through FileViews, plus the CPU temperature sensor (cpuTempC, see
+// "CPU temperature" below). netConn is the interface of the default route
 // (the render shows `wlan0`): this machine runs iwd + systemd-networkd, not
 // NetworkManager. A file that fails keeps the last good value (gpu: -1) and logs one
 // warning, not one per tick.
@@ -41,6 +42,7 @@ Singleton {
     property real vramUsedMb: -1   // NVIDIA only, MiB, -1 when unknown
     property real vramTotalMb: -1
     property real vramPct: -1      // 0-100, -1 when unknown
+    property real cpuTempC: -1     // CPU temperature in °C, -1 when unknown
     property string netConn: "" // default-route interface, "" when there is none
     property real netUp: 0     // bytes/s sent, all non-loopback interfaces
     property real netDown: 0   // bytes/s received
@@ -57,6 +59,11 @@ Singleton {
     property string netDevPath: "/proc/net/dev"
     property string gpuPath: ""  // set by the vendor probe below
     property string drmRoot: "/sys/class/drm"   // where the vendor probe looks for cards
+    // CPU temperature: the sensor file (set by the temperature probe below unless already
+    // set) and where the probe looks.
+    property string tempPath: ""
+    property string hwmonRoot: "/sys/class/hwmon"
+    property string thermalRoot: "/sys/class/thermal"
     // NVIDIA: the card's runtime_status (set by the probe, only with the opt-in, unless
     // already set), the
     // command, the start timeout and the retry back-off (a test config may change them).
@@ -118,6 +125,12 @@ Singleton {
     function parseGpu(text) {
         const v = parseInt(String(text).trim(), 10);
         return isNaN(v) ? -1 : Math.max(0, Math.min(100, v));
+    }
+
+    // hwmon temp*_input / thermal_zone temp content (millidegrees) -> °C, or -1.
+    function parseTemp(text) {
+        const t = String(text).trim();
+        return /^-?\d+$/.test(t) ? Number(t) / 1000 : -1;
     }
 
     // One nvidia-smi line "util, used, total" (csv, noheader, nounits; MiB) ->
@@ -228,6 +241,8 @@ Singleton {
             netDevFile.reload();
             if (root.gpuPath !== "" && !root.nvLive)
                 gpuFile.reload();
+            if (root.tempPath !== "")
+                tempFile.reload();
             root.nvTick(Date.now());
             root.tick();
         }
@@ -351,6 +366,80 @@ Singleton {
             nvStatusPath = probeNv;
         if (nvStatusPath !== "")
             nvCheck();
+    }
+
+    // --- CPU temperature ---------------------------------------------------------------
+    // Read on the shared tick like the /proc files. The sensor is picked once at start:
+    // hwmon0..15 under hwmonRoot by `name` (k10temp, AMD Tctl, wins; else coretemp; both
+    // temp1_input), else thermal_zone0..15 under thermalRoot by `type` (x86_pkg_temp, else
+    // zone 0 when it exists). No sensor: cpuTempC stays -1. scanTemp() runs the probe again
+    // (test configs, after changing the roots).
+    FileView {
+        id: tempFile
+        path: root.tempPath
+        printErrors: false
+        onLoaded: root.cpuTempC = root.parseTemp(text())
+        onLoadFailed: error => {
+            root.cpuTempC = -1;
+            root.warnOnce("temp", "cannot read " + path + " (" + FileViewError.toString(error) + ")");
+        }
+    }
+    onTempPathChanged: if (tempPath === "") cpuTempC = -1
+
+    property int tempProbe: 0   // 0-15 hwmon<N>, 16-31 thermal_zone<N-16>, 32 done
+    readonly property int tempProbeEnd: 32
+    property var tempFound: ({})   // k10temp / coretemp / pkg / zone0 -> sensor file
+
+    function scanTemp() {
+        tempFound = {};
+        tempPath = "";
+        tempProbe = 0;
+    }
+
+    FileView {
+        id: tempProbeFile
+        path: root.tempProbe < 16 ? root.hwmonRoot + "/hwmon" + root.tempProbe + "/name"
+            : root.tempProbe < root.tempProbeEnd ? root.thermalRoot + "/thermal_zone" + (root.tempProbe - 16) + "/type" : ""
+        printErrors: false
+        onLoaded: {
+            // Path changes are deferred, as in the vendor probe.
+            const i = root.tempProbe;
+            const name = text().trim();
+            const f = Object.assign({}, root.tempFound);
+            let next = i + 1;
+            if (i < 16) {
+                const input = root.hwmonRoot + "/hwmon" + i + "/temp1_input";
+                if (name === "k10temp" && !f.k10temp) {
+                    f.k10temp = input;
+                    next = root.tempProbeEnd;   // the best match: stop here
+                } else if (name === "coretemp" && !f.coretemp) {
+                    f.coretemp = input;
+                }
+                if (next === 16 && (f.k10temp || f.coretemp))
+                    next = root.tempProbeEnd;   // hwmon had a CPU sensor: no thermal scan
+            } else {
+                const zone = root.thermalRoot + "/thermal_zone" + (i - 16) + "/temp";
+                if (i === 16)
+                    f.zone0 = zone;
+                if (name === "x86_pkg_temp" && !f.pkg) {
+                    f.pkg = zone;
+                    next = root.tempProbeEnd;
+                }
+            }
+            root.tempFound = f;
+            Qt.callLater(() => root.tempProbe = next);
+        }
+        onLoadFailed: {
+            const i = root.tempProbe;
+            const f = root.tempFound;
+            Qt.callLater(() => root.tempProbe = (i === 15 && (f.k10temp || f.coretemp)) ? root.tempProbeEnd : i + 1);
+        }
+    }
+    onTempProbeChanged: {
+        if (tempProbe !== tempProbeEnd || tempPath !== "")
+            return;
+        const f = tempFound;
+        tempPath = f.k10temp || f.coretemp || f.pkg || f.zone0 || "";
     }
 
     // --- NVIDIA stream -----------------------------------------------------------------
