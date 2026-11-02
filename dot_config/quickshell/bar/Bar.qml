@@ -39,7 +39,11 @@ PanelWindow {
     readonly property var battery: UPower.displayDevice
     readonly property bool showBattery: battery.ready && battery.isLaptopBattery
 
+    // Floats Theme.gapOut off the top, left and right edges like a tiled window. The
+    // compositor adds the top margin to the exclusive zone (26 + 6 reserved), and
+    // gaps_out then keeps windows the same 6 px below the bar.
     anchors { top: true; left: true; right: true }
+    margins { top: Theme.gapOut; left: Theme.gapOut; right: Theme.gapOut }
     implicitHeight: 26
     exclusiveZone: implicitHeight
     color: Theme.bg

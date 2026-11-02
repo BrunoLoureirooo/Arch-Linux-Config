@@ -22,7 +22,8 @@ Scope {
     readonly property int maxVisible: 3
     readonly property int defaultTimeoutMs: 5000
     readonly property real px: Theme.px
-    readonly property int railWidth: (Screens.mainScreen && Screens.railShown && Screens.isRail(Screens.mainScreen)) ? Math.round(Screens.mainScreen.width * 0.225) : 0
+    // The rail's width plus its outer gap (Theme.gapOut) when the rail is on this screen.
+    readonly property int railWidth: (Screens.mainScreen && Screens.railShown && Screens.isRail(Screens.mainScreen)) ? Math.round(Screens.mainScreen.width * 0.225) + Theme.gapOut : 0
 
     // Receive time per notification id, for the HH:mm on the toast.
     property var received: ({})

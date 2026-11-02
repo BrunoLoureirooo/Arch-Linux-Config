@@ -32,6 +32,10 @@ Singleton {
 
     readonly property string font: "JetBrainsMono Nerd Font Mono"
     readonly property real px: 12
+    // Outer gap of the bar and the rail from the screen edges (and between them), so they
+    // float like tiled windows. Must equal hyprland.lua general.gaps_out (checked by
+    // tests/test_gaps.py).
+    readonly property int gapOut: 6
 
     function valid(v) {
         return typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v);

@@ -1,5 +1,8 @@
 // Right-hand rail (spec 5.3; render .rail): 22.5% of the screen wide, from below the
-// bar to the bottom, with its width reserved so tiled windows stop at its left edge. A
+// bar to the bottom, with its width reserved so tiled windows stop at its left edge.
+// Like the bar it floats Theme.gapOut (= hyprland gaps_out) off the screen edges: that
+// gap below the bar, right and bottom; the reserved zone is the width plus that gap, so
+// gaps_out leaves the same gap between a tiled window and the rail. A
 // hot Chamfer (a1 -> a2 border, cut corners top-left and bottom-right) holds the
 // widgets in one column over the full height. shell.qml creates it only for
 // Screens.railScreen (the built-in eDP panel, else the main screen) and only while
@@ -31,7 +34,7 @@ PanelWindow {
     readonly property int barHeight: 26
 
     anchors { top: true; bottom: true; right: true }
-    margins.top: barHeight
+    margins { top: Theme.gapOut + barHeight + Theme.gapOut; right: Theme.gapOut; bottom: Theme.gapOut }
     implicitWidth: Math.round((screen ? screen.width : 1920) * 0.225)
     exclusionMode: ExclusionMode.Ignore
     color: "transparent"
@@ -43,7 +46,7 @@ PanelWindow {
         visible: rail.visible
         anchors { top: true; bottom: true; right: true }
         implicitWidth: 1
-        exclusiveZone: rail.implicitWidth
+        exclusiveZone: rail.implicitWidth + Theme.gapOut
         color: "transparent"
         mask: Region {}
         WlrLayershell.layer: WlrLayer.Overlay
