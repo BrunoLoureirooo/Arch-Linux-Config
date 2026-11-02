@@ -262,6 +262,7 @@ All window-manager binds use `Super`, `Ctrl+Alt` or `Ctrl` with a digit; none of
 | Ctrl + Shift + 1..5 | move window to slot on this screen's pool |
 | Super + 1..5, Super + Shift + 1..5 | same as Ctrl + 1..5 and Ctrl + Shift + 1..5 (added 2026-11-02; xremap never remaps them, so Cmd + number does not switch browser tabs) |
 | Ctrl + Alt + ← → and mouse side buttons | step previous/next slot on this screen |
+| Three-finger swipe on the trackpad (left = next, right = previous) | step the slot on this screen; the direction is untested on the real trackpad, swap the two `direction` values in binds.lua if it feels inverted |
 | Ctrl + Alt + ↑ ↓ | same slot in the next/previous pool present on this screen (reaches the workspaces a removed screen left here; no-op with one pool) |
 | Super + Alt + ←↑↓→ or h j k l | focus window |
 | Super + Alt + Shift + ←↑↓→ or h j k l | move window (crosses to the other screen at an edge) |

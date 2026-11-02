@@ -74,6 +74,10 @@ hl.bind("CTRL + ALT + up", function() M.hop_pool(1) end, { description = "same s
 hl.bind("CTRL + ALT + down", function() M.hop_pool(-1) end, { description = "same slot, previous pool on this screen" })
 hl.bind("mouse:275", function() M.step(-1) end, { description = "previous slot (mouse back)" })
 hl.bind("mouse:276", function() M.step(1) end, { description = "next slot (mouse forward)" })
+-- Three-finger swipe on the trackpad, like macOS Spaces: swipe left for the next slot, right
+-- for the previous one, on the focused screen's own pool (the same step as the side buttons).
+hl.gesture({ fingers = 3, direction = "left", action = function() M.step(1) end })
+hl.gesture({ fingers = 3, direction = "right", action = function() M.step(-1) end })
 
 -- Focus and move windows (arrows + vim). Move, not swap, so pushing past the
 -- edge of a screen carries the window onto the next monitor (BenQ is left).

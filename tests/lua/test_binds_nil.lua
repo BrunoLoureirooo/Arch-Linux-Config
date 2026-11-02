@@ -7,8 +7,10 @@ local active -- what hl.get_active_monitor() returns
 local workspaces -- what hl.get_workspaces() returns
 local dispatched = {}
 local binds = {} -- key string -> { action = function or dispatcher, opts = table }
+local gestures = {} -- hl.gesture specs
 hl = {
     bind = function(k, action, opts) binds[k] = { action = action, opts = opts or {} } end,
+    gesture = function(spec) gestures[#gestures + 1] = spec end,
     dispatch = function(d) dispatched[#dispatched + 1] = d end,
     get_active_monitor = function() return active end,
     get_monitor = function() return active end,
@@ -114,5 +116,26 @@ assert(rail, "no SUPER + ALT + R bind")
 assert(type(rail.action) == "table" and rail.action.exec == "qs ipc call rail toggle",
     "SUPER + ALT + R must exec 'qs ipc call rail toggle'")
 assert(rail.opts.description == "rail toggle", "SUPER + ALT + R description")
+
+-- 5. Three-finger swipe: left = next slot, right = previous, on the focused screen's pool,
+-- nil-safe without a monitor.
+local swipes = {}
+for _, g in ipairs(gestures) do
+    assert(g.fingers == 3 and type(g.action) == "function", "gesture must be a 3-finger function")
+    swipes[g.direction] = g.action
+end
+assert(swipes.left and swipes.right and #gestures == 2, "expected exactly a left and a right 3-finger swipe")
+dispatched = {}
+active = nil
+no_error("swipe without a monitor", swipes.left)
+assert(#dispatched == 0, "swipe: no dispatch without a monitor")
+active = { name = "DP-1", description = "BNQ BenQ EX2510S K8M02386019", active_workspace = { id = 2 } }
+swipes.left()
+assert(dispatched[1].focus.workspace == 3, "swipe left on the BenQ slot 2 -> 3")
+swipes.right()
+assert(dispatched[2].focus.workspace == 1, "swipe right on the BenQ slot 2 -> 1")
+active = { name = "eDP-1", description = "", active_workspace = { id = 15 } }
+swipes.left()
+assert(dispatched[3].focus.workspace == 15, "swipe left at the last slot clamps (no wrap)")
 
 print("ok")
