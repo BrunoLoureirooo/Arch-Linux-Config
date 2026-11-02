@@ -66,24 +66,25 @@ PanelWindow {
             anchors.rightMargin: Math.round(rail.px * 0.8)
             clip: true
 
-            // Full height in two groups: the clock and SYS at the top, MEDIA, BLUETOOTH
-            // and CLAUDE at the bottom edge. The spare height is shared between the SYS
-            // network graph (it grows, up to 40% of the rail's height) and the one gap between the groups.
+            // Full height: SYS at the top, CLAUDE at the bottom edge, DISK, VOLUME,
+            // MEDIA (only while a player exists) and BLUETOOTH between them. Every
+            // section has its natural (fixed) height; the spare height is shared evenly
+            // by the gaps between the shown sections (no section stretches).
             ColumnLayout {
                 id: column
                 anchors.fill: parent
                 spacing: Math.round(rail.px * 0.5)
 
-                ClockWidget { Layout.fillWidth: true; px: rail.px }
-                SysWidget {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    px: rail.px
-                    sparkMax: Math.round(rail.height * 0.4)
-                }
+                SysWidget { Layout.fillWidth: true; px: rail.px }
                 Item { Layout.fillHeight: true }
-                MediaWidget { Layout.fillWidth: true; px: rail.px }
+                DiskWidget { Layout.fillWidth: true; px: rail.px }
+                Item { Layout.fillHeight: true }
+                VolumeWidget { Layout.fillWidth: true; px: rail.px }
+                Item { Layout.fillHeight: true }
+                MediaWidget { id: media; Layout.fillWidth: true; px: rail.px }
+                Item { Layout.fillHeight: true; visible: media.visible }
                 BluetoothWidget { Layout.fillWidth: true; px: rail.px }
+                Item { Layout.fillHeight: true }
                 ClaudeWidget { Layout.fillWidth: true; px: rail.px }
             }
         }

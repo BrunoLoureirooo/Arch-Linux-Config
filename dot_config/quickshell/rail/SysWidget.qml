@@ -4,6 +4,8 @@
 // plus a VRM row (`1.0/4.0G`) while the GPU source is the NVIDIA stream; then the
 // network sparkline over Stats.netHistory (one polyline over a faint a1 area, a2 end
 // dot, scaled to the window's maximum) and the caption `up <rate>  <iface>  down <rate>`.
+// The rows are the rail's thick rows (StatRow at rowPx); the sparkline has a fixed
+// height of about two rows, so spare rail height goes to the spacing between sections.
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Shapes
@@ -14,13 +16,12 @@ ColumnLayout {
     id: root
 
     property real px: Theme.px
-    // Tallest the sparkline grows to when the rail gives this section spare height
-    // (Layout.fillHeight); at its natural size it is the render's 1.5em.
-    property real sparkMax: Math.round(px * 1.5)
+    // Font size of the stat rows (thicker than the rail's base size).
+    property real rowPx: Math.round(px * 1.7)
     readonly property bool vram: Stats.gpuSource === "nvidia"
     // Value column, the same for every row so the bars line up: wide enough for the
     // VRM text while that row is shown.
-    readonly property real valueWidth: vram ? Math.ceil(vramMetrics.width) : Math.round(px * 2.6)
+    readonly property real valueWidth: vram ? Math.ceil(vramMetrics.width) : Math.round(rowPx * 2.6)
 
     // MiB -> "1.0/4.0G" (one decimal below 10 GiB, whole GiB above), "--" when unknown.
     function vramText(used, total) {
@@ -33,11 +34,11 @@ ColumnLayout {
     TextMetrics {
         id: vramMetrics
         font.family: Theme.font
-        font.pixelSize: root.px
+        font.pixelSize: root.rowPx
         text: "0.0/0.0G"
     }
 
-    spacing: Math.round(px * 0.15)
+    spacing: Math.round(rowPx * 0.45)
 
     SectionLabel {
         Layout.fillWidth: true
@@ -46,63 +47,17 @@ ColumnLayout {
         text: "sys"
     }
 
-    component StatRow: RowLayout {
-        id: row
-        property string label
-        property real value: 0   // 0-100
-        property string text
-        property bool warn: value > 75
-        property bool known: true
-        Layout.fillWidth: true
-        spacing: Math.round(root.px * 0.5)
-
-        Text {
-            Layout.preferredWidth: Math.round(root.px * 2.4)
-            text: row.label
-            color: Theme.dim
-            font.family: Theme.font
-            font.pixelSize: root.px
-            font.letterSpacing: root.px * 0.08
-        }
-
-        // 10 segments, 1px apart; lit a1, warn above 75, unlit line.
-        Item {
-            id: segs
-            Layout.fillWidth: true
-            implicitHeight: Math.round(root.px * 0.6)
-            readonly property int lit: Math.round(Math.max(0, Math.min(100, row.value)) / 10)
-            readonly property real cell: (width - 9) / 10
-
-            Repeater {
-                model: 10
-
-                Rectangle {
-                    required property int index
-                    x: Math.round(index * (segs.cell + 1))
-                    width: Math.round((index + 1) * (segs.cell + 1) - 1) - x
-                    height: segs.height
-                    color: index < segs.lit ? (row.warn ? Theme.warn : Theme.a1) : Theme.line
-                }
-            }
-        }
-
-        Text {
-            Layout.preferredWidth: root.valueWidth
-            horizontalAlignment: Text.AlignRight
-            text: row.text
-            color: row.known ? Theme.fg : Theme.dim
-            font.family: Theme.font
-            font.pixelSize: root.px
-        }
-    }
-
     StatRow {
+        px: root.rowPx
+        valueWidth: root.valueWidth
         label: "CPU"
         value: Stats.cpu
         text: Math.round(Stats.cpu) + "%"
     }
 
     StatRow {
+        px: root.rowPx
+        valueWidth: root.valueWidth
         label: "MEM"
         value: Stats.memPct
         text: Stats.memGb.toFixed(1) + "G"
@@ -110,6 +65,8 @@ ColumnLayout {
 
     StatRow {
         visible: Stats.gpuSource !== "none" && Stats.gpu >= 0
+        px: root.rowPx
+        valueWidth: root.valueWidth
         label: "GPU"
         value: Math.max(0, Stats.gpu)
         text: Math.round(Stats.gpu) + "%"
@@ -117,6 +74,8 @@ ColumnLayout {
 
     StatRow {
         visible: root.vram
+        px: root.rowPx
+        valueWidth: root.valueWidth
         label: "VRM"
         value: Math.max(0, Stats.vramPct)
         text: root.vramText(Stats.vramUsedMb, Stats.vramTotalMb)
@@ -124,6 +83,8 @@ ColumnLayout {
 
     StatRow {
         readonly property real temp: Stats.cpuTempC
+        px: root.rowPx
+        valueWidth: root.valueWidth
         label: "TMP"
         known: temp >= 0
         value: known ? (Math.min(100, Math.max(30, temp)) - 30) / 70 * 100 : 0
@@ -136,9 +97,8 @@ ColumnLayout {
         id: spark
         Layout.fillWidth: true
         Layout.topMargin: Math.round(root.px * 0.2)
-        Layout.fillHeight: true
-        Layout.maximumHeight: Math.max(implicitHeight, root.sparkMax)
-        implicitHeight: Math.round(root.px * 1.5)
+        // About two stat rows high.
+        implicitHeight: Math.round(root.rowPx * 1.33 * 2 + root.spacing)
 
         readonly property var samples: Stats.netHistory
         readonly property real peak: Math.max(1, ...samples)

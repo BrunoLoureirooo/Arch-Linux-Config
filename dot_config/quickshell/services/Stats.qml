@@ -26,6 +26,13 @@ pragma Singleton
 // back to AMD and is retried after nvBackoff (30, 60, 120, then every 300 s; back to
 // 30 s only after a stream that lasted 300 s), each time only if the card is still
 // active. All timing runs on the shared 2 s timer.
+//
+// Disk usage (rail DISK rows, `disks`): no timer and no process per tick. Once at start
+// and then every diskEvery (30) shared ticks, about 60 s, ONE short-lived dfCommand
+// process (`df -P -B1 -T -l -t ext4 -t btrfs -t xfs -t f2fs -t vfat`: only local real
+// filesystems, so tmpfs/devtmpfs/squashfs/overlay/efivarfs and network mounts are never
+// even stat'ed and cannot hang it) is parsed by parseDf(). A refresh that is due while
+// the previous df still runs is skipped. Quickshell has no statvfs, so df it is.
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -48,6 +55,10 @@ Singleton {
     property real netDown: 0   // bytes/s received
     property list<real> netHistory: []  // up + down bytes/s, oldest first
     readonly property int historyLength: 24
+    // Mounted filesystems for the DISK rows: [{mount, source, type, size, used, pct}]
+    // (bytes; pct 0-100), "/" first, then by size, at most diskMax, one per device.
+    property var disks: []
+    readonly property int diskMax: 3
 
     // Emitted on every shared 2 s tick (the Clock service follows it: no timer of its own).
     signal tick()
@@ -72,6 +83,13 @@ Singleton {
     property int nvStartTimeout: 6000
     property list<int> nvBackoff: [30000, 60000, 120000, 300000]
     readonly property bool nvAllowed: Quickshell.env("RICE_NVIDIA") === "1"
+    // Disk usage: the command (a test config may point it at a fake df) and the refresh
+    // period in shared ticks.
+    property list<string> dfCommand: ["df", "-P", "-B1", "-T", "-l", "-t", "ext4", "-t", "btrfs",
+        "-t", "xfs", "-t", "f2fs", "-t", "vfat"]
+    property int diskEvery: 30
+    property int diskTicks: 0
+    readonly property var diskTypes: ["ext4", "btrfs", "xfs", "f2fs", "vfat"]
 
     property var lastCpu: null   // {total, idle} of the previous sample
     property var lastNet: null   // {rx, tx, t} of the previous sample (t in ms)
@@ -213,6 +231,60 @@ Singleton {
         return { up: dtx / dt, down: drx / dt };
     }
 
+    // `df -P -B1 -T` output -> the disks list (see `disks`). Lines are
+    // `source type size used avail capacity mountpoint` (the mount point may hold
+    // spaces); the header, lines with too few fields or non-numeric sizes, a zero size, a
+    // mount point not starting with "/", and types outside diskTypes are skipped. pct is
+    // df's own: used / (used + avail), rounded up. A device mounted twice (btrfs
+    // subvolumes, bind mounts) is listed once, under "/" if that is one of its mounts.
+    function parseDf(text) {
+        const all = [];
+        for (const line of String(text).split("\n")) {
+            const f = line.trim().split(/\s+/);
+            if (f.length < 7 || f[0] === "Filesystem" || !diskTypes.includes(f[1]))
+                continue;
+            if (![f[2], f[3], f[4]].every(v => /^\d+$/.test(v)))
+                continue;
+            const size = Number(f[2]), used = Number(f[3]), avail = Number(f[4]);
+            const mount = f.slice(6).join(" ");
+            if (!(size > 0) || !mount.startsWith("/"))
+                continue;
+            const pct = used + avail > 0 ? Math.min(100, Math.ceil(100 * used / (used + avail))) : 0;
+            all.push({ mount: mount, source: f[0], type: f[1], size: size, used: used, pct: pct, i: all.length });
+        }
+        // Explicit tie-break on df's order: the engine's sort is not guaranteed stable.
+        all.sort((a, b) => (b.mount === "/") - (a.mount === "/") || b.size - a.size || a.i - b.i);
+        const seen = {};
+        return all.filter(d => {
+            if (seen[d.source])
+                return false;
+            seen[d.source] = true;
+            return true;
+        }).slice(0, diskMax);
+    }
+
+    // used, total bytes -> "39/49G", "0.6/1.0G", "145/786G", "1.2/1.8T", "512/900M": both
+    // in the total's unit (M, G or T, 1024 steps), one decimal below 10.
+    function diskText(used, total) {
+        let u = "M", d = 1048576;
+        if (total >= 1024 ** 4) {
+            u = "T";
+            d = 1024 ** 4;
+        } else if (total >= 1024 ** 3) {
+            u = "G";
+            d = 1024 ** 3;
+        }
+        const n = v => v / d < 10 ? (v / d).toFixed(1) : String(Math.round(v / d));
+        return n(used) + "/" + n(total) + u;
+    }
+
+    // Start one df now (unless one is still running) and restart the 30-tick count.
+    function refreshDisks() {
+        diskTicks = 0;
+        if (!dfProc.running)
+            dfProc.running = true;
+    }
+
     // bytes/s -> compact "512B" / "8.4K" / "120K" / "1.2M" / "3.0G" (1024 steps).
     function compactRate(v) {
         if (!(v >= 0))
@@ -244,6 +316,8 @@ Singleton {
             if (root.tempPath !== "")
                 tempFile.reload();
             root.nvTick(Date.now());
+            if (++root.diskTicks >= root.diskEvery)
+                root.refreshDisks();
             root.tick();
         }
     }
@@ -441,6 +515,18 @@ Singleton {
         const f = tempFound;
         tempPath = f.k10temp || f.coretemp || f.pkg || f.zone0 || "";
     }
+
+    // --- Disk usage ----------------------------------------------------------------------
+    Process {
+        id: dfProc
+        command: root.dfCommand
+        // df exits 1 when a filesystem cannot be read or none matched; whatever it
+        // printed is still used (nothing printed: no rows).
+        stdout: StdioCollector {
+            onStreamFinished: root.disks = root.parseDf(text)
+        }
+    }
+    Component.onCompleted: refreshDisks()
 
     // --- NVIDIA stream -----------------------------------------------------------------
     // nvState: "off" (not used, or given up), "checking" (reading runtime_status),

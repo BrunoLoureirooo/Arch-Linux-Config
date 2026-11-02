@@ -2,11 +2,14 @@
 // per connected device: a small a1 square, the name (elided), and when BlueZ reports a
 // battery level a 5-cell meter (low is bad: invert) and `NN%`; otherwise the name only.
 // BlueZ gives one level per device, so there is no sub-line (no left/right/case data
-// is invented). The whole section is hidden when nothing is connected.
-// READ ONLY: this file never calls a device method and never assigns a device
-// property. `devices` can be replaced by a fake model in tests: anything with `values`
-// (Quickshell ObjectModel) or `count`/`get(i)` (ListModel) whose entries have
-// connected, name, battery (0..1) and batteryAvailable.
+// is invented). The section is always shown: with nothing connected it is the heading
+// and one dim line, `no adapter` (no BlueZ adapter), `bluetooth off` (adapter powered
+// off) or `no devices connected`.
+// READ ONLY: this file never calls a device method and never assigns a device or
+// adapter property. `devices` can be replaced by a fake model in tests: anything with
+// `values` (Quickshell ObjectModel) or `count`/`get(i)` (ListModel) whose entries have
+// connected, name, battery (0..1) and batteryAvailable; `adapter` by anything with
+// `enabled`, or null.
 import QtQuick
 import QtQuick.Layouts
 import Quickshell.Bluetooth
@@ -18,6 +21,8 @@ ColumnLayout {
 
     property real px: Theme.px
     property var devices: Bluetooth.devices
+    // Font size of the device rows.
+    property real subPx: Math.round(px * 1.3)
 
     // Bumped when a list model reports changed rows: reads through ListModel.get() are
     // not tracked by the binding below (BluetoothDevice properties are).
@@ -39,7 +44,9 @@ ColumnLayout {
         return all.filter(d => d && d.connected === true);
     }
 
-    visible: connected.length > 0
+    property var adapter: Bluetooth.defaultAdapter
+    readonly property string emptyText: !adapter ? "no adapter" : adapter.enabled !== true ? "bluetooth off" : "no devices connected"
+
     spacing: Math.round(px * 0.2)
 
     Connections {
@@ -55,7 +62,15 @@ ColumnLayout {
         Layout.bottomMargin: Math.round(root.px * 0.15)
         px: root.px
         text: "bluetooth"
-        note: root.connected.length + " connected"
+        note: root.connected.length > 0 ? root.connected.length + " connected" : ""
+    }
+
+    Text {
+        visible: root.connected.length === 0
+        text: root.emptyText
+        color: Theme.dim
+        font.family: Theme.font
+        font.pixelSize: root.px
     }
 
     Repeater {
@@ -68,17 +83,17 @@ ColumnLayout {
             readonly property int pct: Math.max(0, Math.min(100, Math.round((modelData?.battery || 0) * 100)))
 
             Layout.fillWidth: true
-            spacing: Math.round(root.px * 0.55)
+            spacing: Math.round(root.subPx * 0.55)
 
             // The 0.5em square in a 0.55em column (render .bt .dot).
             Item {
-                Layout.preferredWidth: Math.round(root.px * 0.55)
+                Layout.preferredWidth: Math.round(root.subPx * 0.55)
                 Layout.alignment: Qt.AlignVCenter
-                implicitHeight: Math.round(root.px * 0.5)
+                implicitHeight: Math.round(root.subPx * 0.5)
 
                 Rectangle {
                     anchors.verticalCenter: parent.verticalCenter
-                    width: Math.round(root.px * 0.5)
+                    width: Math.round(root.subPx * 0.5)
                     height: width
                     color: Theme.a1
                 }
@@ -91,13 +106,13 @@ ColumnLayout {
                 elide: Text.ElideRight
                 color: Theme.fg
                 font.family: Theme.font
-                font.pixelSize: root.px
+                font.pixelSize: root.subPx
             }
 
             Meter {
                 visible: row.hasBattery
                 Layout.alignment: Qt.AlignVCenter
-                px: root.px
+                px: root.subPx
                 cells: 5
                 invert: true
                 value: row.pct
@@ -108,7 +123,7 @@ ColumnLayout {
                 text: row.pct + "%"
                 color: Theme.fg
                 font.family: Theme.font
-                font.pixelSize: root.px
+                font.pixelSize: root.subPx
             }
         }
     }
