@@ -716,9 +716,8 @@ gone_after() {
     echo never
 }
 n0=$(logn)
-
-# a. One toast: bottom right of the tiling area on the main screen, left of the rail
-#    (right margin = rail 432 + 1.4em = 449, bottom 0.9em = 11), a countdown bar that
+# a. One toast: bottom right of the tiling area on the main screen; the rail lives on eDP-1,
+#    so no rail width is reserved (right margin = 1.4em = 17, bottom 0.9em = 11), a countdown bar that
 #    moves, gone after the 5 s default.
 notify quickshell "shell reloaded in 0.4s" "" 1 -1
 t_sent=$(now)
@@ -730,9 +729,9 @@ r1=$(tj "d['shown'][0]['remaining']")
 sleep 1
 r2=$(tj "d['shown'][0]['remaining']")
 [[ "$(tj "[t['summary'] for t in d['shown']]")" == "['shell reloaded in 0.4s']" && "$(tj "d['shown'][0]['timeout']")" == 5000 \
-    && "$tmon" == DP-1 && $((tx + tw)) == 1471 && $((ty + th)) == 1069 && "$tw" == 228 ]] \
+    && "$tmon" == DP-1 && $((tx + tw)) == 1903 && $((ty + th)) == 1069 && "$tw" == 228 ]] \
     && python3 -I -c "import sys; a, b = float(sys.argv[1]), float(sys.argv[2]); sys.exit(0 if 1 > a > b > 0 else 1)" "$r1" "$r2" \
-    && pass "one toast on DP-1 at $tx,$ty ${tw}x$th (right edge 1471 = rail + 1.4em, bottom 1069), bar $r1 -> $r2" \
+    && pass "one toast on DP-1 at $tx,$ty ${tw}x$th (right edge 1903 = screen - 1.4em, no rail on this screen, bottom 1069), bar $r1 -> $r2" \
     || fail "one toast: layer '$geo', remaining $r1 -> $r2, $(tj d)"
 dt=$(gone_after 8)
 total=$(echo "$(now) - $t_sent" | bc)

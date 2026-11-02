@@ -22,7 +22,7 @@ Scope {
     readonly property int maxVisible: 3
     readonly property int defaultTimeoutMs: 5000
     readonly property real px: Theme.px
-    readonly property int railWidth: Screens.mainScreen ? Math.round(Screens.mainScreen.width * 0.225) : 0
+    readonly property int railWidth: (Screens.mainScreen && Screens.railShown && Screens.isRail(Screens.mainScreen)) ? Math.round(Screens.mainScreen.width * 0.225) : 0
 
     // Receive time per notification id, for the HH:mm on the toast.
     property var received: ({})

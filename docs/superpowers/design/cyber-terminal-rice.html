@@ -253,7 +253,7 @@ td:first-child{color:var(--a1);white-space:nowrap}
       <p class="lede">A mock of the planned Quickshell desktop on your two screens: the BenQ on the left, the laptop panel on the right. Nothing is installed or changed. Everything shown is drawn by Quickshell or Hyprland with blur, shadows and easing still off. Wallpapers and values here are stand-ins.</p>
     </div>
     <div class="status" aria-label="Preview status">
-      <span class="pill">palette <b id="pName">neon-rain</b></span>
+      <span class="pill">scene <b id="pName">7-midnight</b></span>
       <span class="pill">displays <b>2</b></span>
       <span class="pill">pools <b>2 × 5</b></span>
       <span class="pill">anim <b>off</b></span>
@@ -286,7 +286,7 @@ td:first-child{color:var(--a1);white-space:nowrap}
             <tr><td>Workspace badge with occupancy</td><td>bar</td><td>repaint on workspace event</td></tr>
             <tr><td>Corner brackets</td><td>each screen, click-through</td><td>none; optional</td></tr>
             <tr><td>Dithered wallpaper</td><td>baked into the image</td><td>none</td></tr>
-            <tr><td>Glitch on workspace switch</td><td>~250 ms shader pass over a snapshot of the screen, on the top overlay layer above every window</td><td>none at rest; GPU only for those 250 ms; off by default. Mock only: dropped in the build (about +45 MB of memory stayed retained after it played; see docs/superpowers/notes/2026-10-23-glitch-spike.md)</td></tr>
+            <tr><td>Glitch on workspace switch</td><td>~250 ms shader pass over a snapshot of the screen, on the top overlay layer above every window</td><td>none at rest; GPU only for those 250 ms; off by default</td></tr>
             <tr><td>Wallpaper-driven palette</td><td>everything</td><td>runs only when you pick a wallpaper</td></tr>
           </tbody>
         </table></div>
@@ -317,7 +317,7 @@ td:first-child{color:var(--a1);white-space:nowrap}
         <ul>
           <li>You have no status line configured in Claude Code today, so the plan adds one. It reads usage numbers only; it never touches your login token. The unofficial usage endpoint some tools use needs that token, so I am not using it.</li>
           <li class="u">Unverified: whether your plan reports the limits at all. An open upstream issue (<a href="https://github.com/anthropics/claude-code/issues/45133">#45133</a>) says they went missing from the status line input on some setups. The numbers in the mock are made up. If they are not available, the widget is replaced by a plain device list.</li>
-          <li class="u">None of your paired Bluetooth devices are connected right now, so the two shown here are an example state.</li>
+          <li class="u">Your paired devices are the DualSense, AirPods Pro and JBL TUNE760NC; none are connected right now, so the two shown here are an example state.</li>
         </ul>
       </div>
     </div>
@@ -339,7 +339,7 @@ td:first-child{color:var(--a1);white-space:nowrap}
           <span class="dim">now</span><span>9 shared workspaces, <code>Super+1–9</code></span>
           <span class="dim">after</span><span><b>5 per screen</b>: <code>Ctrl+1–5</code> jumps (as on the Mac), <code>Ctrl+Alt+←/→</code> and the mouse side buttons step</span>
           <span class="dim">move window</span><span><code>Ctrl+Shift+1–5</code>; <code>Super+Alt+Shift+arrows</code> pushes a window past an edge to the other screen</span>
-          <span class="dim">focus</span><span><code>Super+Alt+←↑↓→</code> or <code>hjkl</code>; <code>Super</code> + the key under Esc (<code>code:49</code>) jumps screen</span>
+          <span class="dim">focus</span><span><code>Super+Alt+←↑↓→</code> or <code>hjkl</code>; <code>Super+`</code> jumps screen</span>
         </div>
       </div>
     </div>
@@ -390,7 +390,7 @@ td:first-child{color:var(--a1);white-space:nowrap}
       <div class="card">
         <div class="cmp">
           <span class="dim">measured now</span><span>waybar 79 MB + mako 24 MB + hyprpaper 53 MB = <b>156 MB</b></span>
-          <span class="dim">budget</span><span>Quickshell, all of it, at or under <b>156 MB</b> and low single-digit idle CPU. Not met in the build (about 345 MB PSS / 620 MB RSS in the test rig; see docs/deploy.md section 11)</span>
+          <span class="dim">budget</span><span>Quickshell, all of it, at or under <b>156 MB</b> and low single-digit idle CPU</span>
           <span class="dim">rule</span><span>Measure after each step. If the budget is blown, the fallback is keeping waybar and mako and using Quickshell only for the carousel and launcher.</span>
         </div>
       </div>
@@ -436,84 +436,267 @@ const M=[
  {id:'DP-1',name:'BenQ EX2510S',role:'main',main:true,ws:1,sets:{1:['nvim','term'],2:['web'],3:['btop','yazi'],4:[],5:[]}},
  {id:'eDP-1',name:'laptop panel',role:'built-in',main:false,ws:3,sets:{1:['web','term'],2:['yazi'],3:[],4:[],5:[]}}
 ];
-let pi=0, ci=0, focus=0, car=false, run=false, toast=true, glx=true;
+let pi=2, ci=2, focus=0, car=false, run=false, toast=true, glx=true;
 
 /* colour + wallpaper */
 function applyPal(p){const s=document.documentElement.style;['bg','panel','line','dim','fg','a1','a2','warn'].forEach(k=>s.setProperty('--'+k,p[k]))}
 const hex=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16));
 const mix=(a,b,t)=>{const x=hex(a),y=hex(b);return 'rgb('+x.map((v,i)=>Math.round(v+(y[i]-v)*t)).join(',')+')'};
 function rng(s){return()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
-function paint(cv,p,seed){
-  /* 384x216 pixel art, ordered-dither sky, layered city, wet road. Everything is built from the 8 palette tokens. */
-  const w=384,h=216,hz=Math.floor(h*.8);
-  cv.width=w;cv.height=h;const g=cv.getContext('2d'),r=rng(seed);
-  const T={};['bg','a1','a2','fg','warn'].forEach(k=>T[k]=hex(p[k]));
-  const K=[0,0,0],lp=(a,b,t)=>a.map((v,i)=>v+(b[i]-v)*t),cs=a=>'rgb('+a.map(v=>Math.round(v)).join(',')+')';
-  const px=(x,y,c,wd=1,ht=1)=>{g.fillStyle=cs(c);g.fillRect(Math.round(x),Math.round(y),wd,ht)};
+/* paint v5 scenes: three limited-palette poster scenes. Each scene owns a fixed 22-colour palette
+   (8 sky, 5 silhouette, 3+3 accents, 3 hero). The painter writes palette indices only, so the PNG holds at most 22 colours. */
+const SCN=[
+ {n:'5-dusk',ui:4,hz:340,fg:'water',skyE:1.15,
+  pal:{sky:['#1a0b2e','#2d1150','#4a1766','#7a1f78','#b02a7f','#e0407a','#ff6a5a','#ff9a4a'],sil:['#0a0414','#140720','#200c30','#311244','#4a1a5c'],
+       a:['#5c0e48','#ff2e88','#ffb8dc'],b:['#7a2a10','#ff7a1a','#ffd27a'],he:['#ffb04a','#ffe08a','#fff6d0']},
+  hero:{k:'sun',x:.5,y:298,R:118},stars:24,rim:'b',
+  clouds:[[.08,120,330,5],[.55,96,300,4],[.2,200,260,6],[.62,236,320,5],[.0,262,200,3],[.78,170,240,4]],
+  layers:[{k:0,fill:['block','spire','dome','block'],fh:[70,150],dip:.55},
+          {k:1,fill:['pagoda','block','mast','pagoda'],fh:[70,160],dip:.6,items:[['pagoda',.8,210],['mast',.66,200],['mast',.07,170]]},
+          {k:2,walled:[40,120],dip:.65,items:[['pagoda',.22,300,1],['pagoda',.93,190]],signs:.5},
+          {k:3,walled:[16,50],dip:.4,signs:.18}]},
+ {n:'6-evening',ui:0,hz:352,fg:'water',skyE:1.55,
+  pal:{sky:['#070720','#0d0b34','#161048','#22145c','#33186c','#4a1c7a','#681f84','#8e2288','#c02a84','#ff6a4a'],sil:['#020108','#060414','#0b0720','#140c32','#1f1146'],
+       a:['#6a1060','#ff2ea0','#ffc2ea'],b:['#0a5068','#22e8ff','#d0fdff'],he:['#0f5466','#2a96a2','#6cd8d2'],c:['#8a3018','#ff7a2a','#ffd08a']},
+  hero:{k:'planet',x:.63,y:192,R:148},stars:70,rim:'mix',hot:['b','a'],signMax:4,glit:['he2','he1','b1'],glitW:.8,
+  lit:[['b0','a0'],['b0','a0','b0'],['b1','a1','c1','b0'],['b1','a1','c1']],
+  clouds:[[.02,66,300,3],[.08,262,180,3]],calm:1,
+  layers:[{k:0,fill:['block','spire','dome','block'],fh:[50,130],dens:.05},
+          {k:1,fill:['block','dome','block','spire','block'],fh:[70,160],dens:.08,items:[['orbital',.16,0]]},
+          {k:2,fill:['block','dome','block','block'],fh:[50,130],dens:.1,items:[['arco',.3,300],['ringspire',.88,270],['stack',.415,190],['dome',.72,120]],
+           bigSigns:[['v',.205,250,4,'b'],['w',.555,150,'NOVA','a'],['v',.93,200,3,'a'],['w',.04,120,'BAR','b']]},
+          {k:3,fill:['block','dome','block'],fh:[14,44],dens:.06}]},
+ {n:'7-midnight',ui:3,hz:404,fg:'roofs',skyE:1.2,
+  pal:{sky:['#05041a','#0a0830','#120e46','#1b155e','#271c74','#36248a','#4a2c9c','#62309e','#86349c','#a83c96'],sil:['#030210','#08061e','#0f0b30','#181244','#241b5c'],
+       a:['#0c4a6a','#2ee6ff','#d4fcff'],b:['#5e1a5a','#ff4aa8','#ffc6e6'],he:['#a69ee8','#dcd6ff','#ffffff'],c:['#7a4a12','#ffb02e','#ffe4a6'],e:['#0c5a3e','#3cff9e','#caffe2']},
+  hero:{k:'moon',x:.34,y:168,R:104},stars:260,rim:'he',rain:.35,rim2:['a1','b1','c1'],air:7,fogMix:1,roofNeon:1,hot:['a','b','c','b','a','e'],
+  lit:[['a0','b0','c0'],['a0','b0','c0','c0'],['a1','b1','c1','he0','c1','e1','a1','b1'],['a1','b1','c1','he0','c2','b0','e1']],
+  clouds:[[.12,232,360,5],[.25,212,150,3],[.6,90,260,3],[.72,250,300,4]],
+  layers:[{k:0,fill:['block','spire','dome','block'],fh:[90,210],items:[['orbital',.79,0]]},
+          {k:1,fill:['mega','spire','mast','block'],fh:[100,220]},
+          {k:2,fill:['mega','dome','block','mega'],fh:[80,180],items:[['spire',.46,320]],signs:.35},
+          {k:3,fill:['mega','block'],fh:[30,90],signs:.45}]}
+];
+function paint(cv,S,seed){
+  if(!S||!S.pal)S=SCN[0];
+  const w=960,h=540,hz=S.hz;
+  cv.width=w;cv.height=h;const g=cv.getContext('2d');
+  const C=paint.C||(paint.C={}),key=S.n+'|'+seed;
+  if(C[key]){g.putImageData(C[key],0,0);return}
+  const r=rng(seed*131+7),ri=(a,b)=>a+Math.floor(r()*(b-a+1)),pick=a=>a[Math.floor(r()*a.length)],cl=(v,a=0,b=1)=>v<a?a:v>b?b:v;
+  const pl=S.pal,P=[...pl.sky,...pl.sil,...pl.a,...pl.b,...pl.he,...(pl.c||[]),...(pl.d||[]),...(pl.e||[])].map(hex),LU=P.map(c=>c[0]*.3+c[1]*.59+c[2]*.11);
+  const NS=pl.sky.length,N1=NS-1,rg=(o,n)=>Array.from({length:n},(_,i)=>o+i);
+  const SK=rg(0,NS),SL=rg(NS,5),A=rg(NS+5,3),B=rg(NS+8,3),HE=rg(NS+11,3),Cc=pl.c?rg(NS+14,3):null,Dd=pl.d?rg(NS+14+(pl.c?3:0),3):null,Ee=pl.e?rg(NS+14+(pl.c?3:0)+(pl.d?3:0),3):null;
+  const RAMP={a:A,b:B,he:HE,c:Cc,d:Dd,e:Ee},ix=t=>RAMP[t.replace(/\d$/,'')][+t.slice(-1)];
+  const IB=new Uint8Array(w*h),LY=new Uint8Array(w*h);let curL=0;
   const BAY=[0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5],bay=(x,y)=>(BAY[(y&3)*4+(x&3)]+.5)/16;
-  const s1=lp(T.bg,T.a2,.34),s3=lp(T.bg,T.a1,.26);
-  const sky=t=>{t=Math.max(0,Math.min(1,t));return t<.7?lp(T.bg,s1,t/.7):lp(s1,s3,(t-.7)/.3)};
-  /* sky: 18-level ordered dither */
-  const img=g.createImageData(w,h),LV=18;
-  for(let y=0;y<h;y++){const t=Math.min(1,y/hz);for(let x=0;x<w;x++){const lvl=Math.min(LV,Math.floor(t*LV+bay(x,y)));const c=sky(lvl/LV),i=(y*w+x)*4;img.data[i]=c[0];img.data[i+1]=c[1];img.data[i+2]=c[2];img.data[i+3]=255}}
-  g.putImageData(img,0,0);
+  const SD=Math.imul(seed+1,0x9E3779B1);
+  const hs=(x,y)=>{let t=Math.imul(x,0x27d4eb2d)^Math.imul(y,0x165667b1)^SD;t=Math.imul(t^t>>>15,0x85ebca6b);t^=t>>>13;t=Math.imul(t,0xc2b2ae35);return((t^t>>>16)>>>0)/4294967296};
+  const vn=(x,y)=>{const xi=Math.floor(x),yi=Math.floor(y),xf=x-xi,yf=y-yi,u=xf*xf*(3-2*xf),v=yf*yf*(3-2*yf),a=hs(xi,yi),b=hs(xi+1,yi),c=hs(xi,yi+1),d=hs(xi+1,yi+1);return a+(b-a)*u+(c-a)*v+(a-b-c+d)*u*v};
+  const ok=(x,y)=>x>=0&&y>=0&&x<w&&y<h;
+  const set=(x,y,i)=>{x=Math.floor(x);y=Math.floor(y);if(!ok(x,y))return;IB[y*w+x]=i;LY[y*w+x]=curL};
+  const get=(x,y)=>IB[cl(Math.floor(y),0,h-1)*w+cl(Math.floor(x),0,w-1)];
+  const isSky=(x,y)=>{x=Math.floor(x);y=Math.floor(y);return ok(x,y)&&LY[y*w+x]==0};
+  const rect=(x,y,wd,ht,i)=>{for(let j=Math.floor(y);j<y+ht;j++)for(let k=Math.floor(x);k<x+wd;k++)set(k,j,i)};
+  const lift=(x,y,i,t)=>{x=Math.floor(x);y=Math.floor(y);if(!ok(x,y))return;const q=y*w+x;if(t>bay(x,y)&&LU[i]>LU[IB[q]])IB[q]=i};
+  const glow=(cx,cy,R,ramp,k=1)=>{cx=Math.floor(cx);cy=Math.floor(cy);for(let dy=-R;dy<=R;dy++)for(let dx=-R;dx<=R;dx++){const d=Math.hypot(dx,dy)/R;if(d<1){const f=(1-d)*k;lift(cx+dx,cy+dy,ramp[0],f*2.4);lift(cx+dx,cy+dy,ramp[1],(f-.62)*4)}}};
+  const bglow=(x,y,wd,ht,m,ramp)=>{for(let j=y-m;j<y+ht+m;j++)for(let i=x-m;i<x+wd+m;i++){const dx=Math.max(x-i,0,i-(x+wd-1)),dy=Math.max(y-j,0,j-(y+ht-1));if(!dx&&!dy)continue;const f=1-Math.hypot(dx,dy)/m;if(f>0)lift(i,j,ramp[0],f*1.6)}};
+  const line=(x0,y0,x1,y1,i)=>{const n=Math.max(Math.abs(x1-x0),Math.abs(y1-y0))|0;for(let k=0;k<=n;k++){const t=n?k/n:0;set(Math.round(x0+(x1-x0)*t),Math.round(y0+(y1-y0)*t),i)}};
+  const FN={A:'25755',B:'65656',C:'34443',D:'65556',E:'74647',F:'74644',G:'34553',H:'55755',I:'72227',J:'11152',K:'55655',L:'44447',M:'57755',N:'65555',O:'25552',P:'65644',Q:'25563',R:'65655',S:'34216',T:'72222',U:'55557',V:'55552',W:'55775',X:'55255',Y:'55222',Z:'71247',
+   '0':'75557','1':'26227','2':'61247','3':'61216','4':'55711','5':'74616','6':'34757','7':'71222','8':'75757','9':'75716','-':'00700',' ':'00000'};
+  const txt=(x,y,s,sz,i)=>{for(const ch of s){const f=FN[ch]||FN[' '];for(let j=0;j<5;j++){const b=+f[j];for(let k=0;k<3;k++)if(b&(4>>k))rect(x+k*sz,y+j*sz,sz,sz,i)}x+=4*sz}};
+  const kanji=()=>{const m=new Uint8Array(25),St=(x0,y0,dx,dy,n)=>{for(let k=0;k<n;k++){const X=x0+dx*k,Y=y0+dy*k;if(X>=0&&X<5&&Y>=0&&Y<5)m[Y*5+X]=1}};
+   const n=ri(2,4);for(let k=0;k<n;k++){const t=ri(0,6);if(t==0)St(0,ri(0,4),1,0,5);else if(t==1)St(ri(0,4),0,0,1,5);else if(t==2)St(1,ri(0,4),1,0,3);else if(t==3)St(ri(1,3),ri(0,2),0,1,3);else if(t==4){St(0,0,1,0,5);St(0,0,0,1,5);St(4,0,0,1,5)}else if(t==5)St(0,4,1,-1,5);else{St(1,1,1,0,3);St(1,3,1,0,3);St(1,1,0,1,3);St(3,1,0,1,3)}}return m};
+  const WORDS=['HOTEL','RAMEN','BAR','NOODLE','24H','OPEN','CLUB','SUSHI','DATA','NET','CYBER','LIVE','SYNTH','NOVA','GRID','TECH','NEON','KAIJU','DOJO','SOBA','LOVE','TAXI','VR','2077','SAKE','MEDS','ZONE'];
+  const HX=Math.round(S.hero.x*w),HY=S.hero.y,HR=S.hero.R;
+  const skyIdx=y=>{const t=Math.pow(cl(y/hz),S.skyE);return Math.min(N1,Math.floor(t*(N1+.999)))};
+
+  /* 1 sky: eight hard bands, Bayer seam on the lower edge of each band */
+  for(let y=0;y<h;y++){const t=Math.pow(cl(y/hz),S.skyE),s=t*(N1+.999),i=Math.floor(s),f=s-i;for(let x=0;x<w;x++)IB[y*w+x]=SK[Math.min(N1,i+(f>.66&&(f-.66)/.34>bay(x,y)?1:0))]}
+  const up=(x,y,n)=>{x=Math.floor(x);y=Math.floor(y);if(!ok(x,y))return;const q=y*w+x;if(IB[q]<NS)IB[q]=Math.min(N1,IB[q]+n)};
   /* stars */
-  for(let i=0;i<80;i++){const x=Math.floor(r()*w),y=Math.floor(r()*hz*.5),b=r(),c=lp(sky(y/hz),b<.08?T.a1:T.fg,.35+r()*.5);
-    px(x,y,c);if(b>.93){px(x-1,y,c);px(x+1,y,c);px(x,y-1,c);px(x,y+1,c)}}
-  /* moon: dithered halo, disc, banding cuts, craters, rim light */
-  const mx=Math.floor(w*(.2+r()*.55)),my=Math.floor(h*.36),R=Math.floor(h*(.15+r()*.05));
-  for(let dy=-R-12;dy<=R+12;dy++)for(let dx=-R-12;dx<=R+12;dx++){const d=Math.hypot(dx,dy);if(d>R&&d<R+12){const f=1-(d-R)/12;if(f*.5>bay(mx+dx,my+dy))px(mx+dx,my+dy,lp(sky((my+dy)/hz),T.a2,.28))}}
-  for(let dy=-R;dy<=R;dy++){const hw=Math.floor(Math.sqrt(R*R-dy*dy));px(mx-hw,my+dy,T.a2,2*hw+1,1)}
-  for(let dy=Math.floor(R*.1);dy<=R;dy++){const cut=Math.floor((dy-R*.1)/R*5);if(dy%7<cut){const hw=Math.floor(Math.sqrt(R*R-dy*dy));px(mx-hw,my+dy,sky((my+dy)/hz),2*hw+1,1)}}
-  for(let i=0;i<7;i++){const a=r()*Math.PI*2,rr=r()*R*.7,cx=mx+Math.cos(a)*rr,cy=my-R*.1+Math.sin(a)*rr*.8;if(cy<my+R*.1){const s=1+Math.floor(r()*3);px(cx,cy,lp(T.a2,T.bg,.22),s,s)}}
-  for(let dy=-R;dy<=-R*.2;dy++){const hw=Math.floor(Math.sqrt(R*R-dy*dy));px(mx-hw,my+dy,lp(T.a2,T.fg,.4),2,1)}
-  /* cloud streaks with dithered ends */
-  for(let i=0;i<7;i++){const y=Math.floor(hz*(.42+r()*.4)),x0=Math.floor(r()*w*.9),len=50+Math.floor(r()*110),c=lp(sky(y/hz),i%2?T.a1:T.a2,.22+r()*.12);
-    for(let k=0;k<len;k++){const edge=Math.min(k,len-k)/14,th=2+(r()<.3?1:0);for(let j=0;j<th;j++){if(edge>1||edge>bay(x0+k,y+j))px(x0+k,y+j,c)}}}
-  /* flying cars */
-  for(let i=0;i<7;i++){const y=Math.floor(h*(.2+r()*.3)),x=Math.floor(r()*w),dir=r()<.5?-1:1,c=r()<.5?T.a1:T.warn;
-    px(x,y,c,3,1);px(x-dir*3,y,lp(sky(y/hz),c,.4),3,1);px(x-dir*6,y,lp(sky(y/hz),c,.18),2,1)}
-  /* far hills */
-  const ph=[r()*6,r()*6,r()*6],mtn=lp(sky(.8),T.a2,.14);
-  for(let x=0;x<w;x++){const y=Math.round(hz-34-16*Math.sin(x/41+ph[0])-9*Math.sin(x/17+ph[1])-4*Math.sin(x/7+ph[2]));px(x,y,mtn,1,hz-y)}
-  /* city: four layers, far to near */
-  const lights=[];
-  const layers=[
-    {fill:lp(sky(.9),T.bg,.35),hmin:.14,hmax:.30,bw:[8,18],win:0,neon:0},
-    {fill:lp(T.bg,T.a2,.16),hmin:.18,hmax:.40,bw:[7,16],win:.2,neon:.15},
-    {fill:lp(T.bg,T.a1,.10),hmin:.20,hmax:.50,bw:[8,20],win:.28,neon:.25},
-    {fill:lp(T.bg,K,.25),hmin:.16,hmax:.46,bw:[10,26],win:.32,neon:.3}];
-  layers.forEach((Ly,li)=>{let x=-4;while(x<w){
-    const bw=Ly.bw[0]+Math.floor(r()*(Ly.bw[1]-Ly.bw[0]));let bh=Math.floor(hz*(Ly.hmin+r()*(Ly.hmax-Ly.hmin)));if(r()<.12)bh=Math.floor(bh*1.35);
-    const top=hz-bh;px(x,top,Ly.fill,bw,bh+2);
-    let ty=top,tw=bw;if(r()<.4&&bw>9){for(let t=0;t<1+(r()<.4?1:0);t++){tw-=4;const th=5+Math.floor(r()*9);px(x+(bw-tw)/2,ty-th,Ly.fill,tw,th);ty-=th}}
-    if(r()<.25){const ah=8+Math.floor(r()*16),ax=x+Math.floor(bw/2);px(ax,ty-ah,Ly.fill,1,ah);if(li>0)px(ax,ty-ah-1,T.a2,1,2)}
-    if(r()<.12&&bw>8){px(x+2,ty-4,Ly.fill,5,4);px(x+3,ty-6,Ly.fill,3,2)}
-    if(Ly.win){for(let wy=top+4;wy<hz-3;wy+=4){const rowOn=r()<.55;for(let wx=x+2;wx<x+bw-2;wx+=3){
-      if((rowOn&&r()<Ly.win*1.6)||r()<Ly.win*.25){const q=r(),c=q<.4?T.a1:q<.65?T.a2:q<.85?T.fg:T.warn;px(wx,wy,li==3?c:lp(Ly.fill,c,.85),2,2);lights.push([wx,wy,c,li])}}}}
-    if(Ly.neon&&r()<Ly.neon){const nc=r()<.5?T.a1:T.a2,nl=14+Math.floor(r()*Math.max(1,Math.min(40,bh-8))),nx=r()<.5?x:x+bw-1,ny=top+4+Math.floor(r()*Math.max(1,bh-nl-8));
-      px(nx,ny,nc,1,nl);px(nx+(nx==x?-1:1),ny,lp(Ly.fill,nc,.3),1,nl);for(let k=0;k<nl;k+=3)lights.push([nx,ny+k,nc,li])}
-    if(li>=2&&bw>=13&&r()<.16){const sw=bw-4,sh=8+Math.floor(r()*5),sy=top+6+Math.floor(r()*Math.max(1,bh-sh-14)),sc=r()<.5?T.a1:T.a2,sx=x+2;
-      px(sx,sy,sc,sw,sh);px(sx+1,sy+1,lp(T.bg,K,.4),sw-2,sh-2);
-      for(let rr=0;rr<Math.floor((sh-2)/3);rr++){let cx=sx+2;while(cx<sx+sw-3){const dl=1+Math.floor(r()*3);if(r()<.75)px(cx,sy+2+rr*3,r()<.6?sc:T.fg,dl,1);cx+=dl+1}}
-      for(let k=0;k<sw;k+=2)lights.push([sx+k,sy+sh,sc,li])}
-    x+=bw}});
-  /* wet road with reflections */
-  const RH=h-hz;
-  for(let y=hz;y<h;y++){const t=(y-hz)/RH;for(let x=0;x<w;x++){const lvl=Math.floor((1-t)*8+bay(x,y))/8;px(x,y,lp(T.bg,lp(T.bg,T.a1,.2),lvl))}}
-  px(0,hz,lp(T.bg,T.a1,.45),w,1);px(0,hz+2,lp(T.bg,K,.4),w,1);
-  lights.forEach(([x,y,c,li])=>{if(li<2)return;const ry=hz+Math.round((hz-y)*.28)+2;if(ry<h-1&&(ry+x)%2==0)px(x+((ry>>1)&1),ry,lp(T.bg,c,.45))});
-  lights.filter(l=>l[3]>=2).forEach((l,i)=>{if(i%7==0)px(l[0],hz+3,lp(T.bg,l[2],.3),1,6+((l[0]*7)%7))});
-  for(let x=0;x<w;x+=22)px(x+4,hz+Math.round(RH*.6),lp(T.bg,T.fg,.3),9,1);
-  for(let i=0;i<25;i++)px(Math.floor(r()*w),hz+3+Math.floor(r()*(RH-4)),lp(T.bg,T.fg,.35));
-  /* poles and power lines */
-  const pole=lp(T.bg,K,.55),wy=Math.floor(h*.07),x0=Math.floor(w*.07),x1=Math.floor(w*.78);
-  [x0,x1].forEach(x=>{px(x,wy-2,pole,2,hz-wy+10);px(x-5,wy,pole,12,2);px(x-4,wy+7,pole,10,1);px(x-5,wy-1,T.a2,1,1);px(x+6,wy-1,T.a2,1,1)});
-  [0,7].forEach((o,i)=>{for(let x=x0;x<=x1;x++){const t=(x-x0)/(x1-x0);px(x,wy+o+Math.round(Math.sin(Math.PI*t)*(14+i*3)),pole)}});
-  for(let x=0;x<x0;x++)px(x,wy+10-Math.round(x/x0*10),pole);
-  for(let x=x1;x<w;x++)px(x,wy+Math.round((x-x1)/(w-x1)*14),pole);
-  /* rain: far then near */
-  [[90,3,lp(T.bg,T.a1,.35)],[45,5,lp(T.bg,T.a1,.65)]].forEach(([n,len,c])=>{for(let i=0;i<n;i++){const x=r()*w,y=r()*h;for(let k=0;k<len;k++)px(x-k/3,y+k,c)}});
+  for(let i=0;i<S.stars;i++){const x=ri(0,w-1),y=ri(0,Math.floor(hz*.6));if(Math.hypot(x-HX,y-HY)<HR*1.9)continue;const b=r();set(x,y,b<.12?A[1]:b<.5?HE[0]:SK[7]);curL=0;LY[y*w+x]=0;if(b>.93){[[1,0],[-1,0],[0,1],[0,-1]].forEach(([a,d])=>{set(x+a,y+d,HE[0]);LY[(y+d)*w+x+a]=0})}}
+  /* 2 hero */
+  const halo=(R0,R1,n)=>{for(let y=HY-R1;y<=HY+R1;y++)for(let x=HX-R1;x<=HX+R1;x++){const d=Math.hypot(x-HX,y-HY);if(d<=R0||d>R1)continue;const f=1-(d-R0)/(R1-R0),k=f*n,s=Math.floor(k),fr=k-s;up(x,y,s+(fr>.5&&(fr-.5)*2>bay(x,y)?1:0))}};
+  if(S.hero.k=='sun'){halo(HR,HR*1.75,3);
+    for(let y=HY-HR;y<=HY+HR;y++){const t=(y-(HY-HR))/(2*HR);for(let x=HX-HR;x<=HX+HR;x++){if(Math.hypot(x-HX,y-HY)>HR)continue;
+      if(t>.3){const per=11,th=1+Math.floor((t-.3)*12);if(((y-HY+400)%per)<th)continue}
+      const s=t*3,i=Math.floor(s),f=s-i;let k=2-Math.min(2,i+(f>.7&&(f-.7)/.3>bay(x,y)?1:0));set(x,y,HE[k])}}
+    curL=0;for(let y=HY-HR;y<=HY+HR;y++)for(let x=HX-HR;x<=HX+HR;x++)if(ok(x,y))LY[y*w+x]=0}
+  else if(S.hero.k=='moon'){halo(HR,HR*2.1,3);for(let y=HY-HR-5;y<=HY+HR+5;y++)for(let x=HX-HR-5;x<=HX+HR+5;x++){const d=Math.hypot(x-HX,y-HY);if(d>HR+1&&d<HR+4)up(x,y,4)}
+    const L=[-.5,-.4,.77],CR=[];for(let i=0;i<14;i++){const a=r()*6.28,d=Math.sqrt(r())*.82;CR.push([Math.cos(a)*d,Math.sin(a)*d,.05+r()*.12])}
+    for(let y=HY-HR;y<=HY+HR;y++)for(let x=HX-HR;x<=HX+HR;x++){const nx=(x-HX)/HR,ny=(y-HY)/HR,q=nx*nx+ny*ny;if(q>1)continue;const nz=Math.sqrt(1-q),dt=nx*L[0]+ny*L[1]+nz*L[2];
+      let v=dt>.42?2:dt>.08?1:0;const sd=dt>.42?dt-.42:dt>.08?dt-.08:9;if(sd<.06&&sd/.06<bay(x,y))v=Math.max(0,v-1);
+      const m=vn(nx*3+4,ny*3+9)+.5*vn(nx*7,ny*7);if(m>1.0&&v>0&&(m>1.12||bay(x,y)>.5))v--;
+      for(const[cx,cy,cr]of CR){const dd=Math.hypot(nx-cx,ny-cy)/cr;if(dd<1&&v>0){v--;if(dd>.75&&(nx-cx)*L[0]+(ny-cy)*L[1]<0)v=Math.min(2,v+2);break}}
+      set(x,y,HE[v]);if(q>.94&&dt<.25)set(x,y,A[1])}
+    curL=0;for(let y=HY-HR;y<=HY+HR;y++)for(let x=HX-HR;x<=HX+HR;x++)if(ok(x,y))LY[y*w+x]=0}
+  else if(S.hero.k=='planet'){halo(HR,HR*1.4,2);const tilt=-.34,ct=Math.cos(tilt),st=Math.sin(tilt),flat=.24,rIn=1.32,rOut=1.95,L=[-.62,-.42,.66];
+    const ringAt=(x,y)=>{const dx=x-HX,dy=y-HY,u=dx*ct+dy*st,v=-dx*st+dy*ct,e=Math.hypot(u,v/flat)/HR;return[e,v]};
+    const ringCol=e=>{const t=(e-rIn)/(rOut-rIn);if(t<0||t>1)return -1;if(t>.52&&t<.58)return -1;return t<.14?Cc[0]:t<.3?Cc[1]:t<.42?Cc[2]:t<.52?Cc[1]:t<.7?A[1]:t<.86?Cc[1]:A[0]};
+    const R2=Math.ceil(HR*rOut)+2;
+    for(let y=HY-R2;y<=HY+R2;y++)for(let x=HX-R2;x<=HX+R2;x++){if(!ok(x,y))continue;const[e,v]=ringAt(x,y),rc=ringCol(e);if(rc>=0&&v<0)set(x,y,rc)}
+    for(let y=HY-HR;y<=HY+HR;y++)for(let x=HX-HR;x<=HX+HR;x++){const nx=(x-HX)/HR,ny=(y-HY)/HR,q=nx*nx+ny*ny;if(q>1)continue;const nz=Math.sqrt(1-q),dt=nx*L[0]+ny*L[1]+nz*L[2];
+      const lat=(-nx*st+ny*ct),band=Math.floor(lat*6+.35*Math.sin(nx*4+lat*9)+10)%3;let step=dt>.45?2:dt>.12?1:0;const sd=dt>.45?dt-.45:dt>.12?dt-.12:9;if(sd<.07&&sd/.07<bay(x,y))step=Math.max(0,step-1);
+      const tone=[[SL[3],HE[0],HE[1]],[SL[2],SL[4],HE[0]],[SL[3],HE[0],HE[2]]][band][step];set(x,y,q>.955&&dt>.3?B[2]:q>.93&&dt>.3?B[1]:tone)}
+    for(let y=HY-R2;y<=HY+R2;y++)for(let x=HX-R2;x<=HX+R2;x++){if(!ok(x,y))continue;const[e,v]=ringAt(x,y),rc=ringCol(e);if(rc>=0&&v>=0){const inP=Math.hypot(x-HX,y-HY)<HR;set(x,y,inP&&rc==A[0]?SL[2]:rc)}
+      else if(v>=0&&e>=rIn-.06&&e<rIn&&Math.hypot(x-HX,y-HY)<HR)set(x,y,SL[1])}
+    curL=0;for(let y=HY-R2;y<=HY+R2;y++)for(let x=HX-R2;x<=HX+R2;x++)if(ok(x,y))LY[y*w+x]=0}
+  else if(S.hero.k=='holo'){halo(HR,HR*2.3,3);for(let y=HY-HR;y<=HY+HR;y++){const t=(y-(HY-HR))/(2*HR),sh=(y%23==7)?3:0;for(let x=HX-HR;x<=HX+HR;x++){const d=Math.hypot(x-HX,y-HY);if(d>HR)continue;
+      if(y%3==0){set(x+sh,y,B[0]);continue}const s3=t*4,i=Math.floor(s3),f=s3-i,b2=Math.min(3,i+(f>.7&&(f-.7)/.3>bay(x,y)?1:0));set(x+sh,y,d>HR-1.5?HE[2]:[HE[1],B[2],B[1],A[1]][b2])}}
+    const m=kanji(),gs=Math.round(HR*.15);for(let q=0;q<25;q++)if(m[q])for(let j=0;j<gs;j++)for(let i=0;i<gs;i++){const X=HX-2.5*gs+(q%5)*gs+i,Y=HY-2.5*gs+Math.floor(q/5)*gs+j;const e=i==0||j==0||i==gs-1||j==gs-1;if(e)set(X,Y,A[2]);else if(Y%3)set(X,Y,A[1])}
+    curL=0;for(let y=HY-HR;y<=HY+HR;y++)for(let x=HX-HR;x<=HX+HR+3;x++)if(ok(x,y))LY[y*w+x]=0}
+  else{halo(HR*.6,HR*2.6,3)}
+  /* 3 cloud streaks: flat bands, lit on the edge that faces the hero */
+  for(const[xf,y,len,th]of S.clouds){const x0=Math.round(xf*w),k=skyIdx(y),body=SK[Math.max(0,k-2)],litE=y>HY?'top':'bot';
+    for(let i=0;i<len;i++){const x=x0+i,e=Math.sin(Math.PI*i/len),tt=Math.max(1,Math.round(th*e*(.6+.8*vn(i/14,y)))),bt=Math.max(1,Math.round(tt*.35));
+      for(let j=-tt;j<=bt;j++){set(x,y+j,body);LY[(y+j)*w+x]=0}
+      const near=Math.abs(x-HX)<HR*2.6&&Math.abs(y-HY)<HR*1.8,lc=near?(S.hero.k=='sun'?B[1]:HE[0]):SK[Math.min(N1,k+1)],ly=litE=='bot'?y+bt:y-tt;if(ok(x,ly)){set(x,ly,lc);LY[ly*w+x]=0}}}
+
+  /* building kit. k: 0 far .. 3 near. */
+  const BODY=[SL[4],SL[3],SL[2],SL[1]],SHD=[SL[3],SL[2],SL[1],SL[0]];
+  const LIT=S.lit?S.lit.map(l=>l.map(ix)):[[A[0],B[0]],[A[0],B[0],B[0]],[A[1],B[1],B[0],A[0],HE[0]],[A[1],B[1],HE[0],B[0]]];
+  const hot=S.hot?S.hot.map(t=>RAMP[t]):[A,B];
+  const shadeSide=(x,bw,top,k)=>{const sw=Math.max(1,Math.round(bw*.22)),toward=HX>x+bw/2;rect(toward?x:x+bw-sw,top,sw,hz-top,SHD[k])};
+  const win=(x0,x1,y0,y1,px,py,cw,ch,dens,k)=>{for(let wy=y0;wy+ch<=y1;wy+=py){const m=r(),p=m<.15?.8:m<.55?.04:dens;for(let wx=x0;wx+cw<=x1;wx+=px)if(r()<p)rect(wx,wy,cw,ch,pick(LIT[k]))}};
+  const beacon=(x,y,ramp)=>{set(x,y,ramp[2]);set(x-1,y,ramp[1]);set(x+1,y,ramp[1]);set(x,y-1,ramp[1]);glow(x,y,6,ramp,.9)};
+  const WP=[[3,4,1,1],[3,4,1,2],[4,5,2,2],[5,6,2,3]];
+  let LD=0;
+  const SH={
+   block(x,bw,top,k){rect(x,top,bw,hz-top,BODY[k]);shadeSide(x,bw,top,k);const[px,py,cw,ch]=WP[k];win(x+2,x+bw-2,top+4,hz-(S.shops&&k==3?20:6),px,py,cw,ch,LD||S.dens||.28,k);if(S.shops&&k==3&&bw>20){const sc2=pick([Cc||B,Dd||A,A,B]),aw=pick(hot);for(let i=x+2;i<x+bw-2;i++){set(i,hz-18,aw[(i>>2)&1?1:0]);set(i,hz-17,SL[0]);for(let j=hz-15;j<hz-1;j++)set(i,j,(i-x)%13<2?SL[0]:j<hz-12?sc2[1]:sc2[0])}bglow(x+2,hz-15,bw-4,14,4,sc2)}if(S.strips&&k>=1&&r()<S.strips){const rp=pick(hot),sx=r()<.5?x:x+bw-1,sl=ri(20,Math.max(21,Math.floor((hz-top)*.6))),sy=top+ri(4,Math.max(5,hz-top-sl-8));rect(sx,sy,1,sl,rp[k>=2?2:1]);rect(sx+(sx==x?1:-1),sy,1,sl,rp[k>=2?1:0])}
+     if(r()<.35){const tw=Math.round(bw*.6),th=ri(6,16);rect(x+(bw-tw)/2,top-th,tw,th,BODY[k]);}if(r()<.3){const ah=ri(8,26);rect(x+bw/2,top-ah,1,ah,BODY[k]);if(k>0&&!(S.calm&&k<3))beacon(Math.floor(x+bw/2),top-ah-1,B)}return bw},
+   containers(x,bw,top,k){let y=hz;const CW=[20,26][k>1?1:0];while(y>top){const cw=ri(CW-6,CW),cx=x+ri(-4,4),ch=k>1?7:5,col=r()<.16?pick([A[0],B[0]]):BODY[k];rect(cx,y-ch,cw,ch,col);if(k>=2)for(let i=2;i<cw;i+=3)rect(cx+i,y-ch+1,1,ch-2,col==BODY[k]?SHD[k]:SL[Math.max(0,k-1)]);else rect(cx,y-1,cw,1,SHD[k]);
+       if(r()<.25&&k>0)rect(cx+ri(2,cw-5),y-ch+2,3,2,pick(LIT[k]));y-=ch}if(k>0&&r()<.5){rect(x+6,y-12,1,12,BODY[k]);beacon(x+6,y-13,A)}return CW+4},
+   mega(x,bw,top,k){const H=hz-top,toward=HX>x+bw/2,st=10;for(let y=top;y<hz;y++){const t=(y-top)/H,ww=Math.round(bw*(.3+.7*Math.min(1,Math.floor(t*5)/4)));const x0=toward?x+bw-ww:x;rect(x0,y,ww,1,BODY[k])}
+     for(let y=top+4;y<hz-2;y+=6){const t=(y-top)/H,ww=Math.round(bw*(.3+.7*Math.min(1,Math.floor(t*5)/4))),x0=toward?x+bw-ww:x;rect(x0,y,ww,1,SHD[k]);for(let i=x0+2;i<x0+ww-2;i+=4)if(r()<(k>1?.18:.1))rect(i,y+2,2,2,pick(LIT[k]));if(k>1&&r()<.12)rect(x0+2,y+1,ww-4,1,pick([A[0],B[0]]))}
+     rect(toward?x+bw-6:x,top-ri(10,30),2,30,BODY[k]);return bw},
+   spire(x,bw,top,k){const H=hz-top,hw0=Math.max(4,Math.round(bw/2));for(let y=top;y<hz;y++){const t=(y-top)/H,hw=Math.max(0,Math.round(hw0*Math.min(1,.15+t*1.6)));const rib=(y-top)%6==0&&t<.75;rect(x+hw0-hw-(rib?1:0),y,2*hw+1+(rib?2:0),1,rib&&k>0?SHD[k]:BODY[k])}
+     if(k>1)for(let y=top+30;y<hz-6;y+=12)set(x+hw0,y,pick(LIT[k]));rect(x+hw0,top-14,1,14,BODY[k]);beacon(x+hw0,top-15,k>1?B:A);return 2*hw0+1},
+   dome(x,bw,top,k){const R=Math.round(bw/2),hb=Math.max(8,hz-top-R*.7),by=hz-hb;rect(x,by,bw,hb,BODY[k]);shadeSide(x,bw,by,k);
+     for(let dy=0;dy<=R*.7;dy++){const hw=Math.round(R*Math.sqrt(1-(dy/(R*.7))**2));rect(x+R-hw,by-dy,2*hw,1,(dy%5==4&&k>0)?SHD[k]:BODY[k])}
+     for(let a=0;a<3;a++){const ax=x+R+(a-1)*Math.round(R*.4),ah=ri(10,24)+(a==1?14:0),ay=by-Math.round(R*.7*Math.sqrt(1-((ax-x-R)/R)**2));rect(ax,ay-ah,1,ah,BODY[k]);if(a==1&&k>0&&!(S.calm&&k<3))beacon(ax,ay-ah-1,B)}
+     const[px,py,cw,ch]=WP[k];win(x+2,x+bw-2,by+4,hz-4,px,py,cw,ch,.25,k);return bw},
+   mast(x,bw,top,k){const ht=hz-top,hw=7;for(let j=0;j<ht;j++){const t=j/ht,o=Math.round(hw*(1-t));set(x+hw-o,hz-j,BODY[k]);set(x+hw+o,hz-j,BODY[k]);if(j%8<1)rect(x+hw-o,hz-j,2*o+1,1,BODY[k]);if(j%8==4&&o>1)line(x+hw-o,hz-j-4,x+hw+o,hz-j+4,BODY[k])}
+     beacon(x+hw,top-1,B);beacon(x+hw,Math.round(top+ht*.4),B);return 2*hw+1},
+   holo(x,bw,top,k){bw=Math.max(bw,22);const cx=x+bw/2;rect(x,top,bw,hz-top,BODY[k]);for(let y=top+6,n=0;y<hz-20;y+=14,n++){const ramp=hot[n%2];rect(x,y,bw,5,ramp[0]);rect(x,y+2,bw,1,ramp[1]);if(n%3==1){const m=kanji();for(let q=0;q<25;q++)if(m[q])set(cx-2+q%5,y-0+Math.floor(q/5),ramp[2])}}
+     for(let i=0;i<bw;i++){set(x+i,top,A[1]);}glow(cx,top,10,A,.8);bglow(x,top,bw,hz-top-20,8,A);return bw},
+   cantilever(x,bw,top,k){const cw=16;rect(x,top,cw,hz-top,BODY[k]);shadeSide(x,cw,top,k);for(let y=top+8,s=0;y<hz-24;y+=ri(18,30),s++){const L=ri(26,56),d=s%2?1:-1,sx=d>0?x+cw:x-L;rect(sx,y,L,7,BODY[k]);rect(sx,y+6,L,1,SHD[k]);for(let i=sx+2;i<sx+L-2;i+=3)if(r()<.55)set(i,y+3,pick(LIT[k]))}return cw+30},
+   garden(x,bw,top,k){const H=hz-top;for(let y=top;y<hz;y++){const t=(y-top)/H,ww=Math.round(bw*(.35+.65*Math.floor(t*6)/6));rect(x+(bw-ww)/2,y,ww,1,BODY[k])}
+     for(let s=1;s<6;s++){const y=Math.round(top+H*s/6),ww=Math.round(bw*(.35+.65*s/6)),x0=x+(bw-ww)/2;for(let i=0;i<ww;i++){if(r()<.6)set(x0+i,y,B[0]);if(r()<.25)set(x0+i,y+1,B[0]);if(r()<.08)set(x0+i,y+2,B[0])}for(let i=x0+3;i<x0+ww-3;i+=4)if(r()<.3)set(i,y+4,pick(LIT[k]))}return bw},
+   pagoda(x,bw,top,k,big){const n=big?8:ri(4,6),H=hz-top-(big?30:16),th=H/n;let yb=hz;const ramp=pick(hot);
+     for(let t=0;t<n;t++){const tw=Math.round(bw*(1-t/n*.55)),x0=Math.round(x+(bw-tw)/2),yt=Math.round(hz-(t+1)*th);rect(x0+2,yt+3,tw-4,yb-yt-3,BODY[k]);
+       const ew=tw+8,ex=x0-4;rect(ex,yt+2,ew,2,BODY[k]);set(ex-1,yt+1,BODY[k]);set(ex-2,yt,BODY[k]);set(ex+ew,yt+1,BODY[k]);set(ex+ew+1,yt,BODY[k]);rect(x0+2,yt,tw-4,2,BODY[k]);
+       if(k>=1){const lc=k>=2?ramp[1]:ramp[0];for(let i=0;i<ew;i++)set(ex+i,yt+4,lc);set(ex-2,yt,lc);set(ex+ew+1,yt,lc);if(k>=2){for(let i=0;i<ew;i+=2)set(ex+i,yt+4,ramp[2]);bglow(ex,yt+4,ew,1,5,ramp)}}
+       if(k>=1)for(let i=x0+4;i<x0+tw-4;i+=4)if(r()<.45)rect(i,yt+7,2,Math.max(1,Math.round(th*.3)),pick(LIT[k]));yb=yt}
+     const sx=Math.round(x+bw/2),sh=big?34:16;for(let j=0;j<sh;j++)set(sx,yb-j,BODY[k]);for(let j=4;j<sh-4;j+=4)rect(sx-1,yb-j,3,1,BODY[k]);beacon(sx,yb-sh-1,ramp);return bw},
+   arco(x,bw,top,k){const W=150,H=hz-top,cx=x+W/2,gl=A;for(let y=top;y<hz;y++){const t=(y-top)/H,ow=W/2*(.5+.5*Math.pow(Math.sin(Math.PI*Math.min(1,t*1.15)),.5)),gw=t>.14&&t<.78?W*.2*Math.pow(Math.sin(Math.PI*(t-.14)/.64),.7):0;
+       for(let i=-Math.round(ow);i<=Math.round(ow);i++){if(Math.abs(i)<gw)continue;const edge=Math.abs(Math.abs(i)-gw)<1.2&&gw>0;set(cx+i,y,edge?gl[1]:Math.abs(i)>=Math.round(ow)-1?B[0]:(i*(HX-cx)<0&&Math.abs(i)>ow*.55)?SHD[k]:BODY[k])}
+       if(gw>2)for(let i=-Math.round(ow)+3;i<ow-3;i+=4)if(Math.abs(i)>gw+2&&(y-top)%7==3&&r()<.3)rect(cx+i,y,2,2,pick(LIT[k]))}
+     for(let y=top+Math.round(H*.24);y<top+H*.72;y+=Math.round(H*.12)){const t=(y-top)/H,gw=W*.2*Math.pow(Math.sin(Math.PI*(t-.14)/.64),.7);rect(cx-gw,y,2*gw,4,BODY[k]);for(let i=-gw+2;i<gw-2;i+=3)set(cx+i,y+2,B[1])}
+     const ry=top+Math.round(H*.45),rr=Math.round(W*.13);for(let a=0;a<360;a+=1){const rx=cx+Math.cos(a*Math.PI/180)*rr,yy=ry+Math.sin(a*Math.PI/180)*rr*1.6;if(isSky(rx,yy)||!0){lift(rx,yy,A[2],1);lift(rx+1,yy,A[1],1)}}glow(cx,ry,rr*2,A,.7);
+     rect(cx,top-40,2,40,BODY[k]);beacon(cx,top-41,A);return W},
+   ringtower(x,bw,top,k){const W=86,cx=x+W/2,rings=[[top+70,C1()],[top+150,A],[top+230,B],[top+300,Dd||A]];function C1(){return Cc||B}
+     const ring=(ry,rp,front)=>{const rx=W/2+30;for(let a=0;a<360;a+=.4){const t=a*Math.PI/180,X=cx+Math.cos(t)*rx,Y=ry+Math.sin(t)*7;if((Math.sin(t)>0)!=front)continue;set(X,Y,rp[front?2:1]);set(X,Y+1,rp[1])}if(front)bglow(cx-rx,ry-7,2*rx,15,6,rp)};
+     rings.forEach(([ry,rp])=>ring(ry,rp,false));
+     for(let y=top;y<hz;y++){const t=(y-top)/(hz-top),hw=Math.round(W/2*(t<.08?.45:t<.18?.7:1));rect(cx-hw,y,2*hw,1,BODY[k]);if(y%5<2&&t>.18)for(let i=-hw+4;i<hw-4;i+=4)if(vn(i/3,y/5)>.42)rect(cx+i,y,2,1,pick(LIT[3]))}
+     shadeSide(cx-W/2,W,top+Math.round((hz-top)*.18),k);{const s0=top+Math.round((hz-top)*.2);for(const sx of[cx-W/2,cx+W/2-1]){rect(sx,s0,1,hz-s0-20,A[2]);rect(sx+(sx<cx?1:-1),s0,1,hz-s0-20,A[1])}}
+     const sy=top+10,sw=60;rect(cx-sw/2-2,sy-2,sw+4,34,SL[0]);for(let j=0;j<30;j++){const t=j/30,rp=t<.33?(Cc||B):t<.66?(Dd||A):A;for(let i=0;i<sw;i++)set(cx-sw/2+i,sy+j,j%3==0?rp[0]:rp[1])}txt(cx-23,sy+8,'NOVA',3,SL[0]);txt(cx-24,sy+7,'NOVA',3,HE[2]);bglow(cx-sw/2-2,sy-2,sw+4,34,10,A);
+     rect(cx-1,top-60,3,60,BODY[k]);for(let j=6;j<60;j+=8)rect(cx-3,top-60+j,7,1,BODY[k]);beacon(cx,top-61,A);
+     rings.forEach(([ry,rp])=>ring(ry,rp,true));return W},
+   bigad(x,bw,top,k){const aw=190,ah=86,ay=top-ah-14;rect(x+10,top,bw-20,hz-top,BODY[k]);win(x+12,x+bw-12,top+4,hz-6,5,6,2,3,S.dens||.3,k);for(let i=x+14;i<x+aw;i+=24){rect(i,ay+ah,2,top-ay-ah,SL[0]);line(i,ay+ah,i+22,top,SL[0])}
+     rect(x-2,ay-2,aw+4,ah+4,SL[0]);const bands=[Cc||B,Dd||A,A,A,B];for(let j=0;j<ah;j++){const t=j/ah*bands.length,bi=Math.floor(t),f=t-bi,rp=bands[Math.min(bands.length-1,bi+(f>.7&&(f-.7)/.3>bay(0,j)?1:0))];for(let i=0;i<aw;i++)set(x+i,ay+j,j%4==0?rp[0]:rp[1])}
+     const m=kanji(),m2=kanji();for(let q=0;q<25;q++){if(m[q])rect(x+12+(q%5)*7,ay+12+Math.floor(q/5)*7,7,7,SL[0]);if(m2[q])rect(x+52+(q%5)*7,ay+12+Math.floor(q/5)*7,7,7,SL[0])}
+     txt(x+98,ay+18,'KAIJU',4,SL[0]);txt(x+97,ay+17,'KAIJU',4,HE[2]);txt(x+100,ay+52,'2077',3,SL[0]);for(let i=0;i<aw;i++){set(x+i,ay-2,A[2]);set(x+i,ay+ah+1,A[2])}bglow(x-2,ay-2,aw+4,ah+4,12,A);
+     for(let i=0;i<aw;i+=12){set(x+i,ay-5,Cc?Cc[2]:B[2]);glow(x+i,ay-5,3,Cc||B,.6)}return bw},
+   ringspire(x,bw,top,k){const W=SH.spire(x,bw,top,k),cx=x+Math.floor(W/2),H=hz-top;[[.22,A],[.42,B],[.62,A]].forEach(([f,rp],i)=>{const ry=Math.round(top+H*f),rx=10+i*5;for(let a=0;a<360;a+=1){const t=a*Math.PI/180,X=cx+Math.cos(t)*rx,Y=ry+Math.sin(t)*rx*.22;if(Math.sin(t)<0&&Math.abs(X-cx)<3)continue;set(X,Y,Math.sin(t)>=0?rp[1]:rp[0])}glow(cx,ry,rx+3,rp,.35)});return W},
+   stack(x,bw,top,k){SH.containers(x,bw,top,k);SH.containers(x+16,bw,top+40,k);return 40},
+   orbital(x,bw,top,k){const cx=x;for(let y=0;y<hz;y++){set(cx,y,BODY[0]);set(cx+1,y,SL[3])}for(let y=20;y<hz;y+=46)beacon(cx,y,B);
+     const ry=96,rx=70;for(let a=0;a<360;a+=.5){const t=a*Math.PI/180,X=cx+Math.cos(t)*rx,Y=ry+Math.sin(t)*rx*.13;set(X,Y,Math.sin(t)>0?HE[0]:SL[4]);if(Math.sin(t)>0&&Math.floor(a)%18==0){set(X,Y+1,A[1]);set(X,Y-1,A[2])}}
+     rect(cx-3,300,8,10,SL[4]);set(cx-1,303,A[1]);set(cx+2,303,A[1]);return 4}
+  };
+  const PLACED=[];
+  const banner=(x,y,n,ramp,s)=>{const gs=5*s,pw=gs+4,step=gs+2*s,ph=n*step+4-s;if(y+ph>hz-8)return;bglow(x,y,pw,ph,3+s,ramp);rect(x,y,pw,ph,SL[0]);
+    for(let i=0;i<pw;i++){set(x+i,y,ramp[1]);set(x+i,y+ph-1,ramp[1])}for(let j=0;j<ph;j++){set(x,y+j,ramp[1]);set(x+pw-1,y+j,ramp[1])}
+    for(let k=0;k<n;k++){const m=kanji();for(let q=0;q<25;q++)if(m[q])rect(x+2+(q%5)*s,y+2+k*step+Math.floor(q/5)*s,s,s,ramp[2])}};
+  const word=(x,y,wd,ramp,s,panel)=>{const pw=wd.length*4*s-s+4,ph=5*s+4;bglow(x,y,pw,ph,3+s,ramp);if(panel){rect(x,y,pw,ph,SL[0]);for(let i=0;i<pw;i++){set(x+i,y,ramp[1]);set(x+i,y+ph-1,ramp[1])}}txt(x+2,y+2,wd,s,ramp[2])};
+  const walled=(k,hmin,hmax,dip)=>{const tops=[];for(let x=-10;x<w+10;){const bw=ri(8,24),e=env(x,dip),bh=Math.round((hmin+r()*(hmax-hmin))*e);const top=hz-bh,col=r()<.5?BODY[k]:SHD[k];rect(x,top,bw,bh,col);
+      if(r()<.4)rect(x+ri(1,bw-4),top-3,3,3,col);for(let y=top+3;y<hz-3;y+=5)for(let i=x+2;i<x+bw-2;i+=4)if(r()<.16)rect(i,y,2,2,pick(LIT[k]));if(r()<.25)rect(x+bw,top+ri(3,10),2,2,SHD[k]);tops.push([x,bw,top]);x+=bw-ri(0,4)}
+    for(let c=0;c<Math.round(w/14);c++){const i=ri(0,tops.length-3),a=tops[i],b=tops[i+ri(1,2)];if(!b)continue;const x0=a[0]+a[1]-1,y0=a[2]+ri(2,12),x1=b[0],y1=b[2]+ri(2,12);if(x1-x0<6||x1-x0>70)continue;const sag=4+(x1-x0)*.12;
+      for(let x2=x0;x2<=x1;x2++){const t=(x2-x0)/(x1-x0),y2=Math.round(y0+(y1-y0)*t+Math.sin(Math.PI*t)*sag);if(isSky(x2,y2)||k>=0)set(x2,y2,SL[0]);if(k>=2&&(x2-x0)%3==1&&r()<.5){const lc=pick([A[1],B[1],HE[0],A[0],B[0]]);set(x2,y2+1,lc);if(r()<.5)set(x2,y2+2,lc)}}}
+    return tops};
+  function env(x,dip){if(!dip||S.hero.k!='sun')return 1;const d=Math.abs(x-HX)/(HR*1.1);return d<1?1-dip*Math.pow(1-d,.6):1}
+  for(const Lr of S.layers){const k=Lr.k;curL=k+1;const placed=[];LD=Lr.dens||0;
+    if(Lr.walled){walled(k,Lr.walled[0],Lr.walled[1],Lr.dip).forEach(t=>placed.push(t))}
+    else{for(let x=-ri(0,20);x<w+10;){if(r()<.08){x+=ri(4,16);continue}const t=pick(Lr.fill),bw0={block:ri(20,44),containers:24,mega:ri(70,130),spire:ri(10,16),dome:ri(36,60),mast:15,holo:ri(22,30),cantilever:16,garden:ri(34,50),pagoda:ri(30,50)}[t]*(1+k*.15);
+      const bh=Math.round((Lr.fh[0]+r()*(Lr.fh[1]-Lr.fh[0]))*env(x+bw0/2,Lr.dip)),used=SH[t](Math.round(x),Math.round(bw0),hz-bh,k);placed.push([Math.round(x),Math.round(bw0),hz-bh]);x+=used+ri(0,k>1?3:6)}}
+    (Lr.items||[]).forEach(([t,xf,ht,big])=>{const bw={pagoda:big?84:56,mast:15,spire:22,holo:30,arco:150,orbital:4,ringtower:86,bigad:200,ringspire:22,stack:40,dome:70}[t];const x=Math.round(xf*w-bw/2);SH[t](x,bw,hz-ht,k,big);placed.push([x,bw,hz-ht,1])});
+    if(Lr.bridges){const ps=placed.filter(p=>p[2]<hz-90).sort((a,b)=>a[0]-b[0]);for(let i=0;i+1<ps.length;i++){const a=ps[i],b=ps[i+1],x0=a[0]+a[1],x1=b[0];if(x1-x0<4||x1-x0>80||r()<.35)continue;const y=Math.max(a[2],b[2])+ri(12,50);if(y>hz-40)continue;
+      rect(x0,y,x1-x0,5,BODY[k]);rect(x0,y,x1-x0,1,SHD[k]);for(let x2=x0+1;x2<x1-1;x2+=2)set(x2,y+2,r()<.7?B[1]:A[1]);bglow(x0,y+2,x1-x0,1,4,B)}}
+    /* rim light on edges that face the hero */
+    if(k>=1){const rc=S.rim=='b'?(k>=2?B[1]:B[0]):(k>=2?HE[0]:SL[4]);for(let y=0;y<hz;y++)for(let x=1;x<w-1;x++){const q=y*w+x;if(LY[q]!=curL||IB[q]!=BODY[k]&&IB[q]!=SHD[k])continue;const d=HX>x?1:-1;
+      if(S.rim=='mix'){if(LY[q+d]==0||LY[q-d]==0){const rr=hot[Math.floor(vn(x/70,k*3)*hot.length*.999)];IB[q]=rr[k>=2?1:0]}continue}
+      if(LY[q+d]==0&&Math.hypot(x-HX,y-HY)<HR*4.2)IB[q]=rc;else if(S.rim2&&k>=2&&LY[q-d]==0)IB[q]=ix(S.rim2[Math.floor(vn(x/90,y/90)*S.rim2.length*.999)])}}
+    /* signs */
+    if(S.signMax&&Lr.bigSigns){Lr.bigSigns.forEach(([kind,xf,yo,wd,rt])=>{const x=Math.round(xf*w),y=hz-yo,rp=RAMP[rt];if(kind=='v'){banner(x,y,wd,rp,2)}else word(x,y,wd,rp,2,true)})}
+    if(Lr.signs){placed.forEach(([x,bw,top,lm])=>{if(lm||bw<16||r()>Lr.signs)return;const ramp=pick(hot),s=k>=3&&!Lr.walled?2:1,mid=Math.abs(x/w-.5)<.42;if(!mid&&r()<.5)return;
+      if(r()<.5){const n=ri(3,5),pw=5*s+4;banner(r()<.5?x-pw+2:x+bw-2,top+6+ri(0,Math.max(1,Math.floor((hz-top)*.3))),n,ramp,s)}
+      else{if(S.bigSigns&&k<3)return;const wd=pick(WORDS.filter(q=>q.length*4*s+4<bw+10));if(wd)word(x+Math.max(0,Math.floor((bw-wd.length*4*s)/2)),top+6+ri(0,Math.max(1,Math.floor((hz-top)*.4))),wd,ramp,s,r()<.6)}})}
+    if(S.rail&&k==S.rail.k){const ry=hz-S.rail.y;for(let x=40+ri(0,60);x<w;x+=150){rect(x,ry+7,6,hz-ry-7,SL[1]);rect(x+5,ry+7,1,hz-ry-7,SL[0]);rect(x-4,ry+7,14,3,SL[1])}
+      for(let x=0;x<w;x++){set(x,ry,x%6==0?B[1]:SL[2]);for(let j=1;j<6;j++)set(x,ry+j,SL[1]);set(x,ry+6,SL[0]);if(x%8==0)set(x,ry+4,A[1])}
+      const tx=ri(Math.floor(w*.04),Math.floor(w*.3)),n=5;for(let c=0;c<n;c++){const x0=tx+c*66;for(let j=0;j<16;j++)for(let i=0;i<64;i++){let cc=j==0?SL[3]:j>13?SL[1]:SL[2];if(j>=3&&j<9&&i%8>1&&i%8<7)cc=(i%8==4&&j>4)?SL[1]:(c%2?Cc[1]:HE[1]);if(j==11)cc=A[1];if(i<2||i>61)cc=SL[1];if(c==n-1&&i>54&&j<9-((i-54)>>1))cc=SK[NS-3];set(x0+i,ry-16+j,cc)}bglow(x0,ry-13,64,6,5,Cc||B)}
+      const hx=tx+n*66-3;set(hx,ry-5,HE[2]);glow(hx,ry-5,8,Cc||B,1);for(let i=0;i<110;i++)for(let j=-Math.floor(i*.08);j<=Math.floor(i*.08);j++)lift(hx+i,ry-5+j,Cc?Cc[0]:B[0],1-i/110)}
+    /* haze: lift the lower part of this layer toward the next lighter tone */
+    if(k<3){const up2=k==0?SK[N1-1]:BODY[k-1];const H2=46+k*6;for(let y=hz-H2;y<hz;y++){const t=(y-(hz-H2))/H2;for(let x=0;x<w;x++){const q=y*w+x;if(LY[q]==curL&&IB[q]==BODY[k]&&t*t*.85>bay(x,y))IB[q]=up2}}}
+  }
+  curL=9;
+  /* 4 foreground */
+  const DN=i=>i<NS?SK[Math.max(0,i-3)]:i<A[0]?SL[0]:i==A[2]?A[1]:i==A[1]?A[0]:i==B[2]?B[1]:i==B[1]?B[0]:i==HE[2]?HE[1]:i==HE[1]?HE[0]:i==HE[0]?B[0]:[Cc,Dd,Ee].some(q=>q&&q[2]==i)?i-1:[Cc,Dd,Ee].some(q=>q&&q[1]==i)?i-1:SL[1];
+  const bright=i=>i>=A[0];
+  const isHot=i=>i>=A[0]&&[A,B,HE,Cc,Dd,Ee].some(q=>q&&(q[1]==i||q[2]==i));
+  if(S.air)for(let i=0;i<S.air;i++){const x=ri(40,w-40),y=ri(30,Math.floor(hz*.55)),rp=pick(hot),d=r()<.5?-1:1;if(Math.hypot(x-HX,y-HY)<HR*1.3)continue;set(x,y,rp[2]);set(x+d*2,y,HE[1]);glow(x,y,4,rp,.8);for(let k=3;k<22;k++)if(k%2)set(x-d*k,y,rp[0])}
+  /* mirror everything above y0 into the ground: per-row ripple, one ramp step darker, two steps and dither-out with distance,
+     ripple gap rows, stretched streaks under hot lights, sharper puddles, rain rings */
+  const refl=(y0,o)=>{const RH=h-y0,PD=o.pud||[];
+    for(let y=y0;y<h;y++){const dy=y-y0,t=dy/RH,sy=y0-1-Math.floor(dy*o.k),sy2=y0-1-Math.floor(dy*.42),wob=(vn(y*.55,o.sd)-.5)*(1.5+dy*.08);
+      for(let x=0;x<w;x++){const base=o.base(t,y),wb=Math.round(wob+(vn(x/23,y*.8)-.5)*1.6);let pud=false;for(const q of PD)if(((x-q[0])/q[2])**2+((y-q[1])/q[3])**2<1){pud=true;break}
+        const gap=!pud&&((y+Math.floor(vn(x/16,y*.7)*3))%o.gn)==0,f=pud?t*.35:t;let c=base;
+        if(!gap&&sy>=0){const src=get(x+wb,sy);
+          if(src>=A[0])c=(f<.4||(f-.4)*1.8<bay(x,y))?DN(src):DN(DN(src));
+          else if(src>=NS){if(f<.55||(f-.55)*2.2<bay(x,y))c=SL[Math.max(0,src-NS-1)]}
+          else if(f<.42||(f-.42)*2.5<bay(x,y))c=SK[Math.max(0,src-3)]}
+        if((c==base||gap)&&sy2>=0&&(y&1)==0&&t<.9){const s2=get(x+wb,sy2);if(isHot(s2)&&bay(x,y)>t*.7)c=DN(DN(s2))}
+        set(x,y,c)}}
+    for(let i=0;i<(o.rings||0);i++){const cx=ri(0,w),cy=ri(y0+6,h-4),rx=ri(2,5);for(let a2=0;a2<360;a2+=24){const X=cx+Math.cos(a2*Math.PI/180)*rx,Y=cy+Math.sin(a2*Math.PI/180)*rx*.3;if(LU[get(X,Y)]<LU[o.ring])set(X,Y,o.ring)}}};
+  const glitter=(y0,hw0,cols)=>{const RH=h-y0;for(let y=y0+1;y<h;y+=2){const t=(y-y0)/RH,hw=hw0*(.95-t*.45)*(.55+.6*vn(y*.3,7));let x=HX-hw;while(x<HX+hw){const L=ri(3,14),c=Math.abs(x-HX)<hw*.35?cols[0]:Math.abs(x-HX)<hw*.7?cols[1]:cols[2];if(r()<.7-t*.3)rect(x,y,L,1,c);x+=L+ri(2,8)}}};
+  if(S.fg=='water'){refl(hz,{k:1.1,sd:3,gn:3,base:t=>t<.3?SL[2]:SL[1],rings:0});
+    glitter(hz,S.glitW?HR*S.glitW:HR,S.glit?S.glit.map(ix):[HE[1],HE[0],B[1]]);
+    for(let i=0;i<3;i++){const bx=ri(80,w-160),by=hz+ri(20,70),s=1+(by-hz)/80;rect(bx,by-3*s,46*s,3*s,SL[0]);rect(bx+12*s,by-7*s,14*s,4*s,SL[0]);set(bx+15*s,by-5*s,B[1]);set(bx+46*s,by-2*s,A[1]);for(let k=0;k<40;k+=3)set(bx+46*s+k,by,SL[2])}
+    rect(0,h-14,w,14,SL[0]);for(let x=0;x<w;x++)set(x,h-15,SL[1]);for(let x=6;x<w;x+=30)rect(x,h-24,2,10,SL[0]);for(let x=0;x<w;x++)set(x,h-24,SL[0])}
+  else if(S.fg=='street'){const SW=hz+8,LR=S.lamp?RAMP[S.lamp]:B,LX=[];
+    for(let x=ri(40,90);x<w;x+=ri(170,230)){LX.push(x);const top=hz-96;rect(x,top,2,hz-top,SL[0]);rect(x,top,12,2,SL[0]);set(x+10,top+2,LR[2]);set(x+11,top+2,LR[2]);glow(x+10,top+3,10,LR,.8)}
+    const PD=[];for(let i=0;i<9;i++)PD.push([ri(0,w),ri(SW+10,h-10),ri(24,70),ri(3,7)]);
+    refl(hz,{k:1.25,sd:5,gn:4,base:(t,y)=>y<SW?SL[2]:t<.45?SL[1]:SL[0],pud:PD,rings:70,ring:SL[3]});
+    for(let x=0;x<w;x++){set(x,SW,SL[3]);set(x,SW+1,SL[0])}
+    (S.trails?S.trails.map(([dy,t])=>[SW+dy,RAMP[t]]):[[SW+22,A],[SW+30,A],[SW+52,B],[SW+62,B]]).forEach(([y,ramp],i)=>{const ph=r()*6;for(let x=0;x<w;x++){const a=Math.sin(x/170+ph)+.4*Math.sin(x/53+ph*2);if(a>-.3){set(x,y,ramp[1]);if(a>.4)set(x,y,ramp[2]);if(a>.1&&y%2==0)set(x,y+1,ramp[0])}}});
+    for(let x=0;x<w;x+=56)rect(x,SW+48,24,1,SL[2]);
+    LX.forEach(x=>{const top=hz-96;rect(x,hz,2,SW-hz,SL[0]);for(let y=top+4;y<SW+4;y++){const hw=(y-top)*.25;for(let i=-hw;i<=hw;i++)lift(x+10+i,y,LR[0],.35*(1-Math.abs(i)/hw))}});
+    if(S.cars)for(let i=0;i<S.cars;i++){const far=i%2==0,base=SW+(far?22:60),sc=far?1:1.4,L=Math.round(40*sc),x=ri(20,w-80),d=far?-1:1;
+      rect(x,base-Math.round(6*sc),L,Math.round(5*sc),SL[2]);rect(x+Math.round(L*.25),base-Math.round(10*sc),Math.round(L*.45),Math.round(4*sc),SL[2]);rect(x+Math.round(L*.28),base-Math.round(9*sc),Math.round(L*.39),Math.round(3*sc),B[0]);
+      rect(x+2,base-1,5,2,SL[0]);rect(x+L-7,base-1,5,2,SL[0]);const fx=d>0?x+L-1:x,bx2=d>0?x:x+L-1;set(fx,base-5,HE[2]);set(bx2,base-5,A[2]);glow(fx,base-5,7,Cc||B,.9);glow(bx2,base-5,5,A,.9);
+      for(let k=1;k<60;k++)lift(fx+d*k,base-5+Math.floor((k%4)/3),Cc?Cc[0]:B[0],1-k/60);for(let k=1;k<80;k++)if(k%2)set(bx2-d*k,base-5,k<30?A[1]:A[0]);for(let k=2;k<16;k+=2)set(fx,base+k,DN(DN(HE[2])))}}
+  else if(S.fg=='roofs'){for(let y=hz-34;y<hz;y++){const t=1-Math.abs(y-(hz-10))/24;for(let x=0;x<w;x++){const q=y*w+x;if(IB[q]<A[0]&&t>bay(x,y)*1.4&&vn(x/50,y/9)>.4)IB[q]=S.fogMix?(vn(x/90,3)>.5?A[0]:B[0]):SL[4]}}
+    refl(hz,{k:1.15,sd:7,gn:3,base:t=>t<.35?SL[2]:SL[1],rings:50,ring:A[0]});glitter(hz,HR*.55,[HE[1],HE[0],A[1]]);
+    const rt=[];for(let x=-10;x<w+10;){const bw=ri(60,160),ty=ri(482,508);rect(x,ty,bw,h-ty,SL[0]);for(let i=0;i<bw;i++)set(x+i,ty,S.roofNeon&&vn((x+i)/30,ty)>.7?hot[Math.floor(vn((x+i)/90,2)*hot.length*.999)][1]:SL[1]);rt.push([x,bw,ty]);
+      const n=ri(1,3);for(let j=0;j<n;j++){const t=r(),ix=x+ri(6,Math.max(7,bw-20));if(t<.4){rect(ix,ty-18,14,12,SL[0]);for(let l=0;l<3;l++)rect(ix+2+l*5,ty-6,1,6,SL[0]);rect(ix+2,ty-20,10,2,SL[0]);rect(ix,ty-18,1,12,SL[1])}
+        else if(t<.7){const ah=ri(14,40);rect(ix,ty-ah,1,ah,SL[0]);for(let l=4;l<ah;l+=6)rect(ix-2,ty-ah+l,5,1,SL[0]);beacon(ix,ty-ah-1,B)}else{rect(ix,ty-6,10,6,SL[0]);rect(ix+3,ty-8,4,2,SL[0])}}
+      for(let y=ty+8;y<h-6;y+=10)for(let i=x+6;i<x+bw-6;i+=8)if(r()<.05)rect(i,y,3,4,S.lit?pick(LIT[3]):pick([A[1],B[1],HE[0],B[0]]));x+=bw+ri(0,10)}
+    for(let c=0;c<5;c++){const a=pick(rt),b=pick(rt);if(a===b)continue;const x0=a[0]+a[1]/2,x1=b[0]+b[1]/2;for(let x=Math.min(x0,x1);x<Math.max(x0,x1);x++){const t=(x-Math.min(x0,x1))/Math.abs(x1-x0);set(x,Math.round(Math.min(a[2],b[2])-24+Math.sin(Math.PI*t)*14),SL[0])}}}
+  /* rain: palette-indexed streaks, never brighter than the second accent step */
+  if(S.rain){const rc=S.fg=='street'?B[0]:A[0];for(let i=0;i<Math.round(1400*S.rain);i++){const x=r()*w*1.1,y=r()*h,len=ri(3,7);for(let k=0;k<len;k++){const X=Math.floor(x-k*.3),Y=Math.floor(y+k);if(ok(X,Y)&&LU[IB[Y*w+X]]<LU[rc])IB[Y*w+X]=rc}}
+    for(let i=0;i<Math.round(90*S.rain);i++){const x=r()*w,y=r()*h;for(let k=0;k<12;k++)set(x-k*.3,y+k,k>9?SK[N1]:SK[N1-1])}}
+  /* write palette indices */
+  const img=g.createImageData(w,h),D=img.data;for(let q=0;q<w*h;q++){const c=P[IB[q]];D[q*4]=c[0];D[q*4+1]=c[1];D[q*4+2]=c[2];D[q*4+3]=255}
+  g.putImageData(img,0,0);C[key]=img;
 }
 const cur=()=>car?ci:pi;
 
@@ -548,7 +731,7 @@ const WIN={
  nvim:()=>({t:'nvim',r:'Bar.qml',b:code(['import Quickshell','import Quickshell.Hyprland','','PanelWindow {','  implicitHeight: 22','  color: Theme.bg','  // one pool per screen','  Workspaces {','    screen: modelData','  }','}'],8)+'\n<span class="ln"><span class="st">NORMAL</span><span class="st2">main</span> <span class="c">Bar.qml        8:3</span></span>'}),
  term:()=>({t:'kitty',r:'~/.config/quickshell',b:`<span class="s">quickshell</span> <span class="a2">main</span> <span class="w">±2</span>\n<span class="a2">❯</span> git log --oneline -3\n<span class="s">a41f9c2</span> per-screen workspaces\n<span class="s">7be03d1</span> carousel: hard snap\n<span class="s">c0d88e4</span> kitty: cmd+c / cmd+v\n<span class="s">quickshell</span> <span class="a2">main</span> <span class="w">±2</span>\n<span class="a2">❯</span> <span class="cur">_</span>`}),
  btop:()=>({t:'btop',r:'q to quit',b:'<span data-live="btop">'+btopText()+'</span>'}),
- yazi:()=>({t:'yazi',r:'~/Pictures/wallpapers',b:PAL.map((p,i)=>(i==cur()?`<span class="sel">${('▌'+p.n+'.png').padEnd(22)}</span>`:` ${p.n}.png`)).join('\n')+`\n<span class="c">${cur()+1}/${PAL.length}</span>`}),
+ yazi:()=>({t:'yazi',r:'~/Pictures/wallpapers',b:SCN.map((p,i)=>(i==cur()?`<span class="sel">${('▌'+p.n+'.png').padEnd(22)}</span>`:` ${p.n}.png`)).join('\n')+`\n<span class="c">${cur()+1}/${SCN.length}</span>`}),
  web:()=>({t:'firefox',r:'wiki.hypr.land',b:`<span class="c"> Binds · Hyprland Wiki          [+]</span>\n <span class="s">https://wiki.hypr.land/Configuring/</span>\n <span class="c">────────────────────────────────</span>\n <span class="a2">#</span> Binds\n\n Forward a key combo to a window\n with <span class="s">sendshortcut</span>, or match the\n focused app before sending it.`})
 };
 
@@ -571,10 +754,10 @@ function screenHTML(m,i){
    <div><div class="lbl">claude<small>2m ago</small></div>${clHTML()}</div></div></aside>`;
   if(toast&&m.main) h+=`<div class="toast ch"><div class="tl"><b>[!] quickshell</b><span>${n.hm}</span></div>shell reloaded in 0.4s<div class="tb"><i></i></div></div>`;
   if(car&&act){
-    const idx=[-2,-1,0,1,2].map(d=>(ci+d+PAL.length)%PAL.length);
-    h+=`<div class="car ch"><div class="hd"><span>WALLPAPER // <b>${PAL[ci].n}.png</b></span><span>1920×1080 · png · ←/→ select · ⏎ apply · esc cancel</span></div>
-      <div class="strip">${idx.map((k,j)=>`<div class="it ch ${j==2?'on hot':''}"><canvas data-th="${k}"></canvas>${j==2?`<span class="nm">${PAL[k].n}</span><span class="ix">${pad(k+1)}</span>`:''}</div>`).join('')}</div>
-      <div class="ft"><span class="sw">PALETTE ${['bg','a1','a2','fg','dim','warn'].map(c=>`<i style="background:${PAL[ci][c]}"></i>`).join('')}</span><span class="pg">${PAL.map((_,k)=>`<i class="${k==ci?'on':''}"></i>`).join('')}</span></div></div>`;
+    const idx=[-2,-1,0,1,2].map(d=>(ci+d+SCN.length)%SCN.length);
+    h+=`<div class="car ch"><div class="hd"><span>WALLPAPER // <b>${SCN[ci].n}.png</b></span><span>1920×1080 · png · ←/→ select · ⏎ apply · esc cancel</span></div>
+      <div class="strip">${idx.map((k,j)=>`<div class="it ch ${j==2?'on hot':''}"><canvas data-th="${k}"></canvas>${j==2?`<span class="nm">${SCN[k].n}</span><span class="ix">${pad(k+1)}</span>`:''}</div>`).join('')}</div>
+      <div class="ft"><span class="sw">PALETTE ${['bg','a1','a2','fg','dim','warn'].map(c=>`<i style="background:${PAL[SCN[ci].ui][c]}"></i>`).join('')}</span><span class="pg">${SCN.map((_,k)=>`<i class="${k==ci?'on':''}"></i>`).join('')}</span></div></div>`;
   }
   if(run&&act) h+=`<div class="run ch"><div class="q"><span><span class="a2">❯</span> fir<span class="cur">_</span></span><span>4 / 312</span></div>
     <div class="cap">applications</div>
@@ -593,14 +776,14 @@ function build(){
       <span class="grp"><button class="ch" type="button" data-step="-1" data-m="${i}">◀ mouse4</button><button class="ch" type="button" data-step="1" data-m="${i}">mouse5 ▶</button></span></div></div>`).join('');
 }
 function render(){
-  const p=PAL[cur()];applyPal(p);$('#pName').textContent=p.n;
+  const sc=SCN[cur()],p=PAL[sc.ui];applyPal(p);$('#pName').textContent=sc.n+' · '+p.n;
   M.forEach((m,i)=>{
     $('#w'+i).classList.toggle('focus',focus==i);
     $('#s'+i).innerHTML=screenHTML(m,i);
     $('#n'+i).textContent=`workspace ${m.ws} of 5 on this screen`;
   });
-  $$('canvas[data-wp]').forEach(c=>paint(c,p,cur()*7+3));
-  $$('canvas[data-th]').forEach(c=>{const k=+c.dataset.th;paint(c,PAL[k],k*7+3)});
+  $$('canvas[data-wp]').forEach(c=>paint(c,sc,cur()*7+3));
+  $$('canvas[data-th]').forEach(c=>{const k=+c.dataset.th;paint(c,SCN[k],k*7+3)});
   $('#bCar').setAttribute('aria-pressed',car);$('#bRun').setAttribute('aria-pressed',run);$('#bToast').setAttribute('aria-pressed',toast);$('#bGl').setAttribute('aria-pressed',glx);
 }
 /* tear: snapshot old and new screen content, then flip through a few staccato frames of displaced bands, channel-split ghosts and corrupted blocks */
@@ -609,7 +792,7 @@ const FR=[['o',1.2,0,0],['o',6,1,3],['o',13,2.6,8],['n',10,3,10],['n',4.5,1.2,4]
 let gxTimer=0,gxEl=null;
 function dup(node){const c=node.cloneNode(true),a=$$('canvas',node),b=$$('canvas',c);b.forEach((x,k)=>{x.width=a[k].width;x.height=a[k].height;x.getContext('2d').drawImage(a[k],0,0)});return c}
 function snap(s){const w=document.createElement('div');w.className='gsrc';[...s.children].forEach(c=>{if(!c.classList.contains('gx'))w.appendChild(dup(c))});return w}
-function noiseURL(){const c=document.createElement('canvas');c.width=48;c.height=12;const g=c.getContext('2d'),p=PAL[cur()],cols=[p.a1,p.a2,p.fg,p.bg,p.bg];
+function noiseURL(){const c=document.createElement('canvas');c.width=48;c.height=12;const g=c.getContext('2d'),p=PAL[SCN[cur()].ui],cols=[p.a1,p.a2,p.fg,p.bg,p.bg];
   for(let y=0;y<12;y++)for(let x=0;x<48;x++){g.fillStyle=cols[Math.floor(Math.random()*cols.length)];g.fillRect(x,y,1,1)}return c.toDataURL()}
 function endTear(){clearTimeout(gxTimer);if(gxEl){gxEl.remove();gxEl=null}}
 function tear(s,oldSnap,newSnap){
@@ -666,7 +849,7 @@ $('#bGl').onclick=()=>{glx=!glx;render();bl()};
 document.addEventListener('keydown',e=>{
   if(e.metaKey||e.altKey||e.ctrlKey)return;const k=e.key;
   if(car){
-    if(k==='ArrowRight'){ci=(ci+1)%PAL.length;render()}else if(k==='ArrowLeft'){ci=(ci+PAL.length-1)%PAL.length;render()}
+    if(k==='ArrowRight'){ci=(ci+1)%SCN.length;render()}else if(k==='ArrowLeft'){ci=(ci+SCN.length-1)%SCN.length;render()}
     else if(k==='Enter')closeCar(true);else if(k==='Escape')closeCar(false);else if(k==='w'||k==='W')closeCar(false);else return;
     e.preventDefault();return}
   if(run&&(k==='Escape'||k===' ')){run=false;render();e.preventDefault();return}
