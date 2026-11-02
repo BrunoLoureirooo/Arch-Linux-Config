@@ -9,7 +9,20 @@
 # config cannot spin a tight loop; a long run resets it to 1 s. When the compositor is
 # gone (HYPRLAND_INSTANCE_SIGNATURE set but its runtime dir removed) the loop exits
 # instead of restarting qs into a dead session.
+#
+# Transparent huge pages are off for qs (prctl PR_SET_THP_DISABLE, set by a python3
+# exec shim, so the child PID is qs itself). With the kernel's THP "always", qs keeps
+# freed GPU-driver and Qt scratch memory resident in half-used 2 MB pages: in the rig the
+# shell idles at ~448 MB RSS with THP and ~320 MB without, and the workspace glitch
+# retains ~+22 MB with THP against ~+5 MB without (docs/deploy.md). No python3: plain qs.
 set -u
+
+qs_cmd=(qs)
+if command -v python3 >/dev/null 2>&1; then
+    qs_cmd=(python3 -I -c 'import ctypes, os, sys
+ctypes.CDLL(None).prctl(41, 1, 0, 0, 0)  # PR_SET_THP_DISABLE, inherited across exec
+os.execvp("qs", ["qs"] + sys.argv[1:])')
+fi
 
 child=""
 stopping=0
@@ -33,7 +46,7 @@ while :; do
         exit 0
     fi
     started=$SECONDS
-    qs "$@" &
+    "${qs_cmd[@]}" "$@" &
     child=$!
     # A stop signal that arrived between the fork and `child=` found no child to signal.
     ((stopping)) && kill -TERM "$child" 2>/dev/null

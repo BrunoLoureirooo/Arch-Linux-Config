@@ -22,6 +22,7 @@ n=$(( $(cat "$FAKE_DIR/count" 2>/dev/null || echo 0) + 1 ))
 echo "$n" > "$FAKE_DIR/count"
 echo "$n $EPOCHREALTIME" >> "$FAKE_DIR/starts"
 echo "$$" > "$FAKE_DIR/qs.pid"
+while read -r k v; do [ "$k" = THP_enabled: ] && echo "$v $PPID" >> "$FAKE_DIR/thp"; done < /proc/$$/status
 what=$(sed -n "${n}p" "$FAKE_DIR/plan" 2>/dev/null)
 [ -z "$what" ] && what=fail
 [ "$what" = fail ] && exit 1
@@ -47,7 +48,7 @@ def alive(pid):
 
 
 class Supervisor:
-    def __init__(self, plan, sig=None, stop_in_backoff=False):
+    def __init__(self, plan, sig=None, stop_in_backoff=False, python=False):
         self.tmp = Path(tempfile.mkdtemp(prefix="qssup-"))
         self.bin = self.tmp / "bin"
         self.bin.mkdir()
@@ -56,6 +57,8 @@ class Supervisor:
         qs.chmod(0o755)
         for tool in ("bash", "sleep", "sed", "cat"):
             (self.bin / tool).symlink_to(shutil.which(tool, path="/usr/bin:/bin"))
+        if python:
+            (self.bin / "python3").symlink_to(shutil.which("python3", path="/usr/bin:/bin"))
         if stop_in_backoff:
             (self.bin / "sleep").unlink()
             (self.bin / "sleep").write_text(FAKE_SLEEP)
@@ -156,6 +159,25 @@ class QsSuperviseTest(unittest.TestCase):
         self.assertEqual(s.proc.returncode, 0)
         self.assertFalse(alive(s.pid("sleep")), "the back-off sleep was killed")
         self.assertEqual(len(s.starts()), 1, "nothing restarted after SIGTERM")
+
+    def thp(self, s):
+        self.assertEqual(len(s.wait_starts(1, timeout=3)), 1)
+        flag, ppid = (s.tmp / "thp").read_text().split("\n")[0].split()
+        return flag, int(ppid)
+
+    def test_qs_runs_with_transparent_huge_pages_off(self):
+        # The python3 shim sets PR_SET_THP_DISABLE and execs qs: THP_enabled 0, and qs
+        # is still the supervisor's own child (the shim replaced itself, no extra process).
+        s = self.sup(["30"], python=True)
+        flag, ppid = self.thp(s)
+        self.assertEqual(flag, "0")
+        self.assertEqual(ppid, s.proc.pid)
+
+    def test_without_python3_qs_still_starts(self):
+        s = self.sup(["30"])
+        flag, ppid = self.thp(s)
+        self.assertEqual(flag, "1")
+        self.assertEqual(ppid, s.proc.pid)
 
 
 if __name__ == "__main__":
