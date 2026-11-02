@@ -8,6 +8,7 @@
 //   qs-run.sh ipc call widgets parse             -> ClaudeWidget's pure helpers on fixtures
 //   qs-run.sh ipc call widgets fakeBt <mode>     -> three | empty (ListModel) | objects | real
 //   qs-run.sh ipc call widgets setConnected <i> <bool>   (fake model only)
+//   qs-run.sh ipc call widgets fakeAdapter <mode>    -> none (null) | off | on | real
 //   qs-run.sh ipc call widgets setCache <path>
 //   qs-run.sh ipc call widgets setClaudeVisible <bool>
 // Real devices are only counted, never named: with the real model `get` reports no
@@ -73,6 +74,16 @@ ShellRoot {
     }
 
     property string mode: "real"
+
+    // Stand-ins for Bluetooth.defaultAdapter (only `enabled` is read).
+    QtObject {
+        id: adapterOff
+        property bool enabled: false
+    }
+    QtObject {
+        id: adapterOn
+        property bool enabled: true
+    }
 
     function fillThree() {
         fakeDevices.clear();
@@ -164,7 +175,9 @@ ShellRoot {
                 bt: {
                     visible: b.visible, shown: shell.shown(b, r.contentItem),
                     note: shell.find(b, i => i.note !== undefined && i.text === "bluetooth").note,
-                    connected: b.connected.length, rows: bRows
+                    connected: b.connected.length, rows: bRows,
+                    texts: shell.texts(b).filter(t => t !== "//").slice(0, shell.fake ? 99 : 2),
+                    emptyText: b.emptyText
                 },
                 claude: {
                     visible: c.visible, cachePath: c.cachePath, noData: c.noData, stale: c.stale,
@@ -228,6 +241,11 @@ ShellRoot {
             else
                 fakeDevices.clear();
             b.devices = fakeDevices;
+        }
+
+        function fakeAdapter(mode: string): void {
+            const b = shell.bt();
+            b.adapter = mode === "none" ? null : mode === "off" ? adapterOff : mode === "on" ? adapterOn : Bluetooth.defaultAdapter;
         }
 
         // Fake models only; never reaches a real device.

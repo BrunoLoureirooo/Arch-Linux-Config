@@ -28,15 +28,15 @@
 #      keeps one derive running, empty/single/broken folders, keyboard focus.
 #  10. Bluetooth and Claude limits widgets (through tests/rig/widgets-test.qml): real
 #      devices counted read-only, fake device models, every claude-limits.json state, live
-#      edits, the real status line writer, the 30 s timer, all five rail sections fit.
+#      edits, the real status line writer, the 30 s timer, all six rail sections fit.
 #  11. NVIDIA GPU source (through tests/rig/nvidia-test.qml, a FAKE nvidia-smi): parser
 #      fixtures, stream values and the VRM row, [N/A], timeout, immediate exit, back-off
 #      restarts, runtime_status not active, missing command, the probe path on a fake drm
 #      tree, opt-in off by default and the rig guard, no fake left after qs stops.
 #  12. Clock service and untrusted text (through tests/rig/clock-text.qml, TZ=Europe/Lisbon):
-#      bar and rail clocks follow a mocked time across the repeated DST hour (01:59 WEST ->
+#      the bar clocks follow a mocked time across the repeated DST hour (01:59 WEST ->
 #      01:00 WET) and a big jump within one 2 s tick, the log stays quiet; a window title,
-#      MPRIS title/artist and a Bluetooth name holding <b>, <br> and <img src=http://...>
+#      MPRIS title/artist, a Bluetooth name and an audio stream name holding <b>, <br> and <img src=http://...>
 #      render as literal plain text and no HTTP request reaches a local listener.
 #  13. Workspace-switch glitch (through tests/rig/glitch.qml, then the production shell):
 #      nothing at rest, one play per switch on that screen only for binds, step and plain
@@ -79,12 +79,18 @@ cleanup() {
     "$R/nested-hypr.sh" stop >/dev/null 2>&1 || true
     [[ -z "$bus_pid" ]] || kill -TERM "$bus_pid" 2>/dev/null || true
     [[ -z "$sup_bus_pid" ]] || kill -TERM "$sup_bus_pid" 2>/dev/null || true
+    [[ -z "${tmp:-}" ]] || "$R/fake-pipewire.sh" stop "$tmp/pw" >/dev/null 2>&1 || true
     [[ -z "${tmp:-}" ]] || rm -rf -- "$tmp"
 }
 trap cleanup EXIT
 
 # --- 1. stage.sh -------------------------------------------------------------------
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/selftest-qs.XXXXXX")
+# Every qs here talks to a private PipeWire (tests/rig/fake-pipewire.sh: two null sinks),
+# never to the owner's audio graph: the rail's VOLUME section and the bar's VOL chip show
+# only the fake devices and the streams this script creates.
+"$R/fake-pipewire.sh" start "$tmp/pw" >/dev/null
+export PIPEWIRE_RUNTIME_DIR="$tmp/pw"
 real_state="$HOME/.config/chezmoi/chezmoistate.boltdb"
 state_before=$(stat -c %Y.%s "$real_state" 2>/dev/null || echo absent)
 cache_before=$(stat -c %Y "$HOME/.cache/chezmoi" 2>/dev/null || echo absent)
@@ -99,14 +105,16 @@ for f in .config/quickshell/shell.qml .config/quickshell/Theme.qml .config/quick
     .config/quickshell/services/qmldir .config/quickshell/bar/Bar.qml \
     .config/quickshell/bar/Workspaces.qml .config/quickshell/wallpaper/Wallpaper.qml \
     .config/quickshell/wallpaper/WallpaperState.qml .config/quickshell/wallpaper/qmldir \
-    .config/quickshell/rail/Rail.qml .config/quickshell/rail/ClockWidget.qml \
+    .config/quickshell/rail/Rail.qml .config/quickshell/rail/StatRow.qml \
     .config/quickshell/rail/SysWidget.qml .config/quickshell/rail/MediaWidget.qml \
+    .config/quickshell/rail/DiskWidget.qml .config/quickshell/rail/VolumeWidget.qml \
     .config/quickshell/rail/SectionLabel.qml .config/quickshell/notifications/Toasts.qml \
     .config/quickshell/launcher/Launcher.qml .config/quickshell/fx/Glitch.qml \
     .config/quickshell/fx/glitch.frag.qsb \
     .local/share/rice/palette.py; do
     [[ -s "$st/$f" ]] || { ok=0; echo "  missing $f"; }
 done
+[[ ! -e "$st/.config/quickshell/rail/ClockWidget.qml" ]] || { ok=0; echo "  rail/ClockWidget.qml still deployed"; }
 for b in qs-supervise rice-palette; do
     [[ -x "$st/.local/bin/$b" ]] || { ok=0; echo "  not executable: .local/bin/$b"; }
 done
@@ -575,9 +583,9 @@ for mon, v in json.load(sys.stdin).items():
 rail_geo=$(layer_xywh rice-rail)
 zone_geo=$(layer_xywh rice-rail-zone)
 reserved=$(H monitors -j | python3 -I -c 'import json,sys; print(" ".join(m["name"] + str(m["reserved"]) for m in json.load(sys.stdin)))')
-[[ "$rail_geo" == "DP-1 1488 26 432 1054" && "$zone_geo" == "DP-1 1919 26 1 1054" \
-    && "$reserved" == "DP-1[0, 26, 432, 0] eDP-1[0, 26, 0, 0]" ]] \
-    && pass "rail at 1488,26 432x1054 below the bar; 432 px reserved on DP-1 only; no rail on eDP-1" \
+[[ "$rail_geo" == "DP-1 1482 38 432 1036" && "$zone_geo" == "DP-1 1919 32 1 1048" \
+    && "$reserved" == "DP-1[0, 32, 438, 0] eDP-1[0, 32, 0, 0]" ]] \
+    && pass "rail at 1482,38 432x1036 (6 px gaps below the bar, right, bottom); 438 px reserved on DP-1 only; no rail on eDP-1" \
     || fail "rail geometry: rail '$rail_geo' zone '$zone_geo' reserved '$reserved'"
 
 # h. A real kitty on DP-1 tiles up to the rail and below the bar (HOME etc. staged, no
@@ -597,9 +605,10 @@ for c in json.load(sys.stdin):
     [[ -n "$geo" ]] && break
 done
 read -r kmon kx ky kw kh <<<"${geo:-x 0 0 0 0}"
-echo "  kitty: monitor $kmon at $kx,$ky size ${kw}x${kh} (right edge $((kx + kw)), rail starts at 1488)"
-[[ "$kmon" == 0 && $((kx + kw)) -le 1488 && $((kx + kw)) -ge 1460 && "$ky" -ge 26 ]] \
-    && pass "kitty on DP-1 stops at the rail's left edge ($((kx + kw)) <= 1488) and below the bar (y $ky)" \
+echo "  kitty: monitor $kmon at $kx,$ky size ${kw}x${kh} (right edge $((kx + kw)), rail starts at 1482)"
+# 1 px border outside at/size: border box 6..1476 x 38..1074 (6 px gaps to edge, bar, rail).
+[[ "$kmon" == 0 && "$kx" == 7 && "$ky" == 39 && $((kx + kw + 1)) == 1476 && $((ky + kh + 1)) == 1074 ]] \
+    && pass "kitty on DP-1: 6 px gap to the rail (border box ends at 1476), the bar (starts at 38) and the edges" \
     || fail "kitty geometry: '$geo'"
 sleep 0.5
 "$R/qs-run.sh" shot DP-1 "$SHOTS/qs-rail-kitty-DP-1.png" >/dev/null
@@ -1522,13 +1531,15 @@ else
     pass "BluetoothWidget/ClaudeWidget: no connect/disconnect/pair/forget calls, no trusted/blocked/name/connected writes"
 fi
 
-# b. Real Bluetooth.devices (read only): the section shows exactly when something is connected.
+# b. Real Bluetooth.devices (read only): the section is always shown; with nothing
+#    connected it says why (no adapter / bluetooth off / no devices connected).
 real=$(wj "(d['realCount'], d['realConnected'], d['bt']['visible'], d['bt']['connected'])")
 read -r rc rcon rvis rn < <(echo "$real" | tr -d '(),')
-echo "  real BlueZ devices: $rc known, $rcon connected; section visible $rvis"
+echo "  real BlueZ devices: $rc known, $rcon connected; section visible $rvis; $(wj "d['bt']['texts']")"
 if [[ "$rcon" == 0 ]]; then
-    [[ "$rvis" == False && "$rn" == 0 && "$(wj "d['sections']")" == "['sys', 'claude']" ]] \
-        && pass "real devices, none connected: BLUETOOTH hidden" || fail "real devices: $real"
+    [[ "$rvis" == True && "$rn" == 0 && "$(wj "d['sections']")" == "['sys', 'disk', 'volume', 'bluetooth', 'claude']" \
+        && "$(wj "d['bt']['texts'][1] in ('no adapter', 'bluetooth off', 'no devices connected')")" == True ]] \
+        && pass "real devices, none connected: BLUETOOTH shown with '$(wj "d['bt']['texts'][1]")'" || fail "real devices: $real $(wj "d['bt']")"
 else
     [[ "$rvis" == True && "$rn" == "$rcon" ]] && pass "real devices: $rcon connected shown (names not printed)" || fail "real devices: $real"
 fi
@@ -1544,8 +1555,19 @@ wc10 setConnected 0 false
 [[ "$(wj "(d['bt']['note'], [r['name'] for r in d['bt']['rows']])")" == "('1 connected', ['Rig Pad'])" ]] \
     && pass "ListModel row disconnects: '1 connected', Rig Pad only" || fail "ListModel disconnect: $(wj "d['bt']")"
 wc10 setConnected 1 false
-[[ "$(wj "(d['bt']['visible'], d['sections'])")" == "(False, ['sys', 'claude'])" ]] \
-    && pass "last fake device disconnects: BLUETOOTH hidden" || fail "all disconnected: $(wj "d['bt']")"
+wc10 fakeAdapter on
+[[ "$(wj "(d['bt']['visible'], d['bt']['note'], d['bt']['texts'], d['sections'])")" == "(True, '', ['BLUETOOTH', 'no devices connected'], ['sys', 'disk', 'volume', 'bluetooth', 'claude'])" ]] \
+    && pass "last fake device disconnects: BLUETOOTH stays, 'no devices connected', no note" || fail "all disconnected: $(wj "d['bt']")"
+wc10 fakeAdapter off
+[[ "$(wj "d['bt']['texts']")" == "['BLUETOOTH', 'bluetooth off']" ]] && pass "adapter powered off: 'bluetooth off'" || fail "adapter off: $(wj "d['bt']")"
+wc10 fakeAdapter none
+[[ "$(wj "d['bt']['texts']")" == "['BLUETOOTH', 'no adapter']" ]] && pass "no adapter: 'no adapter'" || fail "no adapter: $(wj "d['bt']")"
+"$R/qs-run.sh" shot DP-1 "$SHOTS/qs-widgets-bt-none-DP-1.png" >/dev/null
+wc10 setConnected 1 true
+[[ "$(wj "(d['bt']['note'], d['bt']['texts'])")" == "('1 connected', ['BLUETOOTH', '1 connected', 'Rig Pad'])" ]] \
+    && pass "a device connects (adapter state aside): its row replaces the empty text" || fail "reconnect: $(wj "d['bt']")"
+wc10 setConnected 1 false
+wc10 fakeAdapter real
 wc10 fakeBt objects
 [[ "$(wj "(d['bt']['note'], [r['name'] for r in d['bt']['rows']])")" == "('2 connected', ['Rig Buds Pro', 'Rig Pad'])" ]] || fail "objects: $(wj "d['bt']")"
 wc10 setConnected 0 false
@@ -1554,7 +1576,8 @@ wc10 setConnected 2 true
     && pass "QObject devices (Bluetooth.devices shape): connect/disconnect notifications update the rows" \
     || fail "objects change: $(wj "d['bt']")"
 wc10 fakeBt empty
-[[ "$(wj "(d['bt']['visible'], d['bt']['connected'])")" == "(False, 0)" ]] && pass "empty model: BLUETOOTH hidden" || fail "empty: $(wj "d['bt']")"
+[[ "$(wj "(d['bt']['visible'], d['bt']['connected'], d['bt']['texts'][1] == d['bt']['emptyText'])")" == "(True, 0, True)" ]] \
+    && pass "empty model: BLUETOOTH shown with '$(wj "d['bt']['emptyText']")'" || fail "empty: $(wj "d['bt']")"
 
 # d. ClaudeWidget's pure helpers.
 wp10=$("$R/qs-run.sh" ipc call widgets parse)
@@ -1644,7 +1667,12 @@ wc10 setClaudeVisible false
     || fail "timer hidden: $(wj "d['timer']")"
 wc10 setClaudeVisible true
 
-# j. All five sections at 1080p: nothing clipped.
+# j. All six sections at 1080p with everything shown (a player, two devices, four audio
+#    streams, both Claude windows): nothing clipped.
+streams10=()
+for app in "Rig Browser" "Rig Music" "Rig Video" "Rig Call"; do
+    streams10+=("$("$R/fake-pipewire.sh" stream "$tmp/pw" "$app" 0.5)")
+done
 DBUS_SESSION_BUS_ADDRESS="$wbus" python3 -I "$R/fake-mpris.py" "Rig Song" "Rig Artist" 252 >"$tmp/fake10.out" 2>&1 &
 fake_pid=$!
 wc10 setCache "$lim"
@@ -1653,9 +1681,10 @@ wc10 fakeBt three
 sleep 1
 fit=$(wj "(d['sections'], d['fit']['columnHeight'], d['fit']['claudeBottom'], d['fit']['clipHeight'])")
 read -r fcol fbot fclip < <(wj "d['fit']['columnHeight'], d['fit']['claudeBottom'], d['fit']['clipHeight']" | tr -d '(),')
-[[ "$(wj "d['sections']")" == "['sys', 'media', 'bluetooth', 'claude']" ]] && python3 -I -c "import sys; c, b, h = map(float, sys.argv[1:]); sys.exit(not (b <= h and c <= h and b > 250))" "$fcol" "$fbot" "$fclip" \
-    && pass "all five sections fit the 1080p rail: column $fcol px, CLAUDE ends at $fbot of $fclip px" || fail "fit: $fit"
+[[ "$(wj "d['sections']")" == "['sys', 'disk', 'volume', 'media', 'bluetooth', 'claude']" ]] && python3 -I -c "import sys; c, b, h = map(float, sys.argv[1:]); sys.exit(not (b <= h and c <= h and b > 250))" "$fcol" "$fbot" "$fclip" \
+    && pass "all six sections fit the 1080p rail: column $fcol px, CLAUDE ends at $fbot of $fclip px" || fail "fit: $fit"
 "$R/qs-run.sh" shot DP-1 "$SHOTS/qs-widgets-all-DP-1.png" >/dev/null
+for id in "${streams10[@]}"; do "$R/fake-pipewire.sh" destroy "$tmp/pw" "$id"; done
 kill -TERM "$fake_pid" 2>/dev/null || true
 wait "$fake_pid" 2>/dev/null || true
 fake_pid=""
@@ -1943,7 +1972,7 @@ sleep 2
 n0=$(logn)
 pj() { "$R/qs-run.sh" ipc call probe "$@"; }
 ms() { echo $(( $(date -u -d "$1" +%s) * 1000 )); }
-clk() { pj clock | spy "(d['bar:DP-1'][8], d['bar:DP-1'][9], d['bar:eDP-1'][8], d['rail'])"; }
+clk() { pj clock | spy "(d['bar:DP-1'][8], d['bar:DP-1'][9], d['bar:eDP-1'][8])"; }
 
 # a. No SystemClock anywhere in the shell; one shared clock.
 [[ -z "$(grep -rn 'SystemClock *{' "$R/../../dot_config/quickshell" || true)" ]] \
@@ -1957,10 +1986,9 @@ pj mock "$(ms '2026-10-25 01:00:30')"; sleep 2.5
 c2=$(clk)
 pj mock "$(ms '2026-10-25 01:59:10')"; sleep 2.5
 c3=$(clk)
-[[ "$c1" == "('01:59', 'SUN OCT 25', '01:59', ['01:59', 'WEST', 'SUN OCT 25 2026'])" \
-    && "$c2" == "('01:00', 'SUN OCT 25', '01:00', ['01:00', 'WET', 'SUN OCT 25 2026'])" \
-    && "$c3" == "('01:59', 'SUN OCT 25', '01:59', ['01:59', 'WET', 'SUN OCT 25 2026'])" ]] \
-    && pass "DST: 01:59 WEST -> 01:00 WET (back one hour) -> 01:59 WET on both bars and the rail" \
+[[ "$c1" == "('01:59', 'SUN OCT 25', '01:59')" && "$c2" == "('01:00', 'SUN OCT 25', '01:00')" \
+    && "$c3" == "('01:59', 'SUN OCT 25', '01:59')" && "$(pj clock | spy "d['rail']")" == None ]] \
+    && pass "DST: 01:59 WEST -> 01:00 WET (back one hour) -> 01:59 WET on both bars (the rail has no clock)" \
     || fail "DST clock: $c1 | $c2 | $c3"
 # Inside the repeated hour the log stays quiet (SystemClock logged ~2,200 warnings/s here).
 nq=$(logn)
@@ -1973,7 +2001,7 @@ c4=$(clk)
 pj real; sleep 2.5
 c5=$(pj clock | spy "d['bar:DP-1'][8]")
 now5=$(TZ=Europe/Lisbon date +%H:%M); prev5=$(TZ=Europe/Lisbon date -d '-1 min' +%H:%M)
-[[ "$c4" == "('13:37', 'SUN OCT 25', '13:37', ['13:37', 'WET', 'SUN OCT 25 2026'])" && ( "$c5" == "$now5" || "$c5" == "$prev5" ) ]] \
+[[ "$c4" == "('13:37', 'SUN OCT 25', '13:37')" && ( "$c5" == "$now5" || "$c5" == "$prev5" ) ]] \
     && pass "jump to 13:37 shown within one tick; real time again ($c5)" || fail "jump/real: $c4 | $c5 (now $now5)"
 
 # d. Untrusted strings. A local listener records every connection: an <img src> rendered
@@ -2013,8 +2041,10 @@ DBUS_SESSION_BUS_ADDRESS="$pbus" python3 -I "$R/fake-mpris.py" "$t_media" "$t_ar
 fake_pid=$!
 t_bt="<font color=\"red\">Buds</font><br>$(img bt)"
 pj setBt "$t_bt"
+t_stream="<b>App</b><br>$(img stream)"
+s12=$("$R/fake-pipewire.sh" stream "$tmp/pw" "$t_stream" 0.5)
 for _ in $(seq 40); do
-    [[ "$(pj untrusted | spy "len([t for t in d if 'Bold' in t['text'] or 'Song' in t['text'] or 'Artist' in t['text'] or 'Buds' in t['text']])")" -ge 5 ]] && break
+    [[ "$(pj untrusted | spy "len([t for t in d if 'Bold' in t['text'] or 'Song' in t['text'] or 'Artist' in t['text'] or 'Buds' in t['text'] or 'App' in t['text']])")" -ge 6 ]] && break
     sleep 0.3
 done
 sleep 2
@@ -2022,7 +2052,7 @@ u=$(pj untrusted)
 echo "$u" | python3 -I -c "
 import json, sys
 d = json.load(sys.stdin)
-want = {'title': sys.argv[1], 'media': sys.argv[2], 'artist': sys.argv[3], 'bt': sys.argv[4]}
+want = {'title': sys.argv[1], 'media': sys.argv[2], 'artist': sys.argv[3], 'bt': sys.argv[4], 'stream': sys.argv[5]}
 seen = {k: [t for t in d if t['text'] == v] for k, v in want.items()}
 bad = []
 for k, ts in seen.items():
@@ -2033,15 +2063,16 @@ for k, ts in seen.items():
             bad.append(f\"{k} on {t['where']}: plain={t['plain']} lines={t['lines']}\")
 print('ok' if not bad else '; '.join(bad))
 print(' '.join(f'{k}x{len(v)}' for k, v in seen.items()))
-" "$t_title" "$t_media" "$t_artist" "$t_bt" >"$tmp/c12-verdict"
+" "$t_title" "$t_media" "$t_artist" "$t_bt" "$t_stream" >"$tmp/c12-verdict"
 [[ "$(head -1 "$tmp/c12-verdict")" == ok ]] \
-    && pass "window title, MPRIS title/artist, Bluetooth name: literal plain text on one line ($(sed -n 2p "$tmp/c12-verdict"))" \
+    && pass "window title, MPRIS title/artist, Bluetooth name, audio stream name: literal plain text on one line ($(sed -n 2p "$tmp/c12-verdict"))" \
     || fail "untrusted text: $(cat "$tmp/c12-verdict")"
 "$R/qs-run.sh" shot DP-1 "$SHOTS/qs-untrusted-DP-1.png" >/dev/null
 [[ "$ctl" == 1 && ! -s "$lhits" ]] && pass "no HTTP request from the shell (listener positive control: $ctl connection)" \
     || fail "listener: control $ctl, shell connections: $(cat "$lhits")"
 # e. The Bluetooth rows torn down while bound: no TypeError.
 pj clearBt; sleep 0.5
+"$R/fake-pipewire.sh" destroy "$tmp/pw" "$s12"
 kill -TERM "$fake_pid" 2>/dev/null || true; wait "$fake_pid" 2>/dev/null || true; fake_pid=""
 kill -TERM "$kitty_pid" 2>/dev/null || true; wait "$kitty_pid" 2>/dev/null || true; kitty_pid=""
 kill -TERM "$lst_pid" 2>/dev/null || true; wait "$lst_pid" 2>/dev/null || true; lst_pid=""

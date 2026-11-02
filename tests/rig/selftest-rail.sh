@@ -14,7 +14,14 @@
 #      binds.lua key hints) follow a workspace switch; a click on the HUD reaches the
 #      window below it; the rail sections run from the top to the bottom of the rail; the
 #      CPU temperature probe and TMP row on fake hwmon/thermal trees (k10temp, coretemp,
-#      x86_pkg_temp, none), two readings, the warn colour, unknown and garbage values.
+#      x86_pkg_temp, none), two readings, the warn colour, unknown and garbage values;
+#      DISK (parseDf fixtures, a fake df: rows, warn from 90%, one df per refresh and none
+#      per tick), VOLUME on a private PipeWire (fake-pipewire.sh: default sink name and
+#      volume, mute, switch, no sink, streams, markup names as plain text) and the
+#      always-visible BLUETOOTH section.
+# Bar and rail float Theme.gapOut (6 px = gaps_out) off the screen edges; the geometry
+# checks expect exactly that gap between a kitty window and the bar, the rail and the
+# screen edges.
 # Uses its own testbin state when RICE_TESTBIN is set (recommended while other rig runs
 # are going on). Screenshots land in $RICE_TESTBIN/shots/rail-*.png. Exit 0 = all passed.
 set -euo pipefail
@@ -34,10 +41,15 @@ cleanup() {
     [[ -z "$kitty_pid" ]] || kill -TERM "$kitty_pid" 2>/dev/null || true
     "$R/qs-run.sh" stop >/dev/null 2>&1 || true
     "$R/nested-hypr.sh" stop >/dev/null 2>&1 || true
+    [[ -z "$tmp" ]] || "$R/fake-pipewire.sh" stop "$tmp/pw" >/dev/null 2>&1 || true
     [[ -z "$tmp" ]] || rm -rf -- "$tmp"
 }
 trap cleanup EXIT
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/selftest-rail.XXXXXX")
+# Every qs here talks to a private PipeWire (two null sinks, no real devices or streams):
+# the VOLUME section and the bar's VOL chip never see the owner's audio graph.
+"$R/fake-pipewire.sh" start "$tmp/pw" >/dev/null
+export PIPEWIRE_RUNTIME_DIR="$tmp/pw"
 
 H() { "$R/run.sh" hyprctl "$@"; }
 ipc() { "$R/qs-run.sh" ipc call "$@"; }
@@ -76,8 +88,8 @@ rail_extent() { # <png> <monitor-x> -> "top bottom"
 import sys
 raw = open(sys.argv[1], "rb").read()
 w, h = 1920, len(raw) // (1920 * 3)
-x0, x1 = 1488 + 4, 1920 - 14   # clear of the border and the bottom-right cut corner
-rows = [y for y in range(30, h - 4)
+x0, x1 = 1482 + 4, 1914 - 14   # clear of the border and the bottom-right cut corner
+rows = [y for y in range(38 + 4, 1074 - 4)
         if any(max(raw[(y * w + x) * 3:(y * w + x) * 3 + 3]) > 90 for x in range(x0, x1))]
 print(rows[0] if rows else -1, rows[-1] if rows else -1)' "$raw"
 }
@@ -94,23 +106,26 @@ bad=$("$R/qs-run.sh" log | grep -E 'ERROR|WARN' | grep -v -e 'Failed to register
 # a. Placement: the built-in panel, not the main screen (DP-1 stands in for the BenQ).
 ex=$(monx eDP-1)
 rail_geo=$(layer rice-rail)
-[[ "$rail_geo" == "eDP-1 $((ex + 1488)) 26 432 1054" && "$(layer rice-rail-zone)" == "eDP-1 $((ex + 1919)) 26 1 1054" \
-    && "$(reserved)" == "DP-1[0, 26, 0, 0] eDP-1[0, 26, 432, 0]" && "$(nlayer rice-rail)" == 1 ]] \
-    && pass "rail and its 432 px zone on eDP-1 only ($rail_geo); DP-1 keeps its full width" \
+# Bar and rail float 6 px (Theme.gapOut = gaps_out) off the edges: bar 6..32, rail
+# 1482..1914 x 38..1074, reserved = bar 26 + 6 on top, rail 432 + 6 on the right.
+[[ "$rail_geo" == "eDP-1 $((ex + 1482)) 38 432 1036" && "$(layer rice-rail-zone)" == "eDP-1 $((ex + 1919)) 32 1 1048" \
+    && "$(reserved)" == "DP-1[0, 32, 0, 0] eDP-1[0, 32, 438, 0]" && "$(nlayer rice-rail)" == 1 \
+    && "$(layer rice-bar | sort | tr '\n' ' ')" == "DP-1 6 6 1908 26 eDP-1 $((ex + 6)) 6 1908 26 " ]] \
+    && pass "bar 6 px off the top/left/right, rail 6 px off the bar/right/bottom with its 438 px zone on eDP-1 only ($rail_geo)" \
     || fail "placement: rail '$rail_geo' zone '$(layer rice-rail-zone)' reserved '$(reserved)'"
 status_is "shown eDP-1" && pass "ipc rail status: 'shown eDP-1'" || fail "status: $(ipc rail status)"
 [[ "$(nlayer rice-bar)" == 2 ]] && pass "bar still on both screens" || fail "bars: $(nlayer rice-bar)"
 
 "$R/qs-run.sh" shot eDP-1 "$SHOTS/rail-eDP-1.png" >/dev/null
 read -r top bot < <(rail_extent "$SHOTS/rail-eDP-1.png" "$ex")
-[[ "$top" -le 50 && "$bot" -ge 1040 ]] \
-    && pass "screenshot: rail content runs from y $top to y $bot of 1080 (full height)" \
+[[ "$top" -le 56 && "$bot" -ge 1055 ]] \
+    && pass "screenshot: rail content runs from y $top to y $bot (rail 38..1074: full height)" \
     || fail "rail extent on screen: $top..$bot (content bunched at the top?)"
 "$R/qs-run.sh" shot DP-1 "$SHOTS/rail-DP-1.png" >/dev/null
 
 # b. Toggle: hidden = no rail surface, no zone; shown again = as before.
 ipc rail toggle
-wait_for 25 no_rail && status_is "hidden eDP-1" && [[ "$(reserved)" == "DP-1[0, 26, 0, 0] eDP-1[0, 26, 0, 0]" ]] \
+wait_for 25 no_rail && status_is "hidden eDP-1" && [[ "$(reserved)" == "DP-1[0, 32, 0, 0] eDP-1[0, 32, 0, 0]" ]] \
     && pass "toggle: rail hidden, no rice-rail/rice-rail-zone layer left, nothing reserved on eDP-1" \
     || fail "toggle hide: layers $(nlayer rice-rail)/$(nlayer rice-rail-zone), reserved '$(reserved)', $(ipc rail status)"
 "$R/qs-run.sh" shot eDP-1 "$SHOTS/rail-hidden-eDP-1.png" >/dev/null
@@ -118,7 +133,7 @@ ipc rail hide
 sleep 0.5
 no_rail && status_is "hidden eDP-1" && pass "hide while hidden: stays hidden" || fail "hide twice"
 ipc rail toggle
-wait_for 25 rail_on eDP-1 && [[ "$(layer rice-rail)" == "$rail_geo" && "$(reserved)" == "DP-1[0, 26, 0, 0] eDP-1[0, 26, 432, 0]" ]] \
+wait_for 25 rail_on eDP-1 && [[ "$(layer rice-rail)" == "$rail_geo" && "$(reserved)" == "DP-1[0, 32, 0, 0] eDP-1[0, 32, 438, 0]" ]] \
     && status_is "shown eDP-1" && pass "toggle again: rail back on eDP-1 with its zone" || fail "toggle show: $(layers)"
 ipc rail hide
 wait_for 25 no_rail || true
@@ -130,22 +145,22 @@ wait_for 25 rail_on eDP-1 && [[ "$(nlayer rice-rail)" == 1 ]] && pass "hide, sho
 #    goes back when the lid opens (hyprctl reload re-applies the monitor line).
 "$R/run.sh" bash "$REPO/dot_local/bin/executable_lid" close
 wait_for 25 rail_on DP-1 || true
-[[ "$(monitors)" == "DP-1" ]] && rail_on DP-1 && [[ "$(layer rice-rail)" == "DP-1 1488 26 432 1054" ]] \
-    && [[ "$(reserved)" == "DP-1[0, 26, 432, 0]" ]] && status_is "shown DP-1" \
+[[ "$(monitors)" == "DP-1" ]] && rail_on DP-1 && [[ "$(layer rice-rail)" == "DP-1 1482 38 432 1036" ]] \
+    && [[ "$(reserved)" == "DP-1[0, 32, 438, 0]" ]] && status_is "shown DP-1" \
     && pass "lid closed: eDP-1 gone, rail and zone fall back to DP-1" \
     || fail "fallback: monitors '$(monitors)' $(layer rice-rail) reserved '$(reserved)' $(ipc rail status)"
 "$R/qs-run.sh" shot DP-1 "$SHOTS/rail-fallback-DP-1.png" >/dev/null
 read -r top bot < <(rail_extent "$SHOTS/rail-fallback-DP-1.png" 0)
-[[ "$top" -le 50 && "$bot" -ge 1040 ]] && pass "fallback rail on DP-1 is full height too ($top..$bot)" || fail "fallback extent $top..$bot"
+[[ "$top" -le 56 && "$bot" -ge 1055 ]] && pass "fallback rail on DP-1 is full height too ($top..$bot)" || fail "fallback extent $top..$bot"
 ipc rail toggle
-wait_for 25 no_rail && status_is "hidden DP-1" && [[ "$(reserved)" == "DP-1[0, 26, 0, 0]" ]] \
+wait_for 25 no_rail && status_is "hidden DP-1" && [[ "$(reserved)" == "DP-1[0, 32, 0, 0]" ]] \
     && pass "toggle on the fallback screen hides it there" || fail "fallback toggle: $(layers)"
 ipc rail toggle
 wait_for 25 rail_on DP-1 || fail "fallback toggle back"
 "$R/run.sh" bash "$REPO/dot_local/bin/executable_lid" open
 wait_for 50 rail_on eDP-1 || true
 [[ "$(monitors)" == "DP-1 eDP-1" ]] && rail_on eDP-1 && [[ "$(nlayer rice-rail)" == 1 \
-    && "$(reserved)" == "DP-1[0, 26, 0, 0] eDP-1[0, 26, 432, 0]" ]] && status_is "shown eDP-1" \
+    && "$(reserved)" == "DP-1[0, 32, 0, 0] eDP-1[0, 32, 438, 0]" ]] && status_is "shown eDP-1" \
     && pass "lid open: eDP-1 back, the rail moves back to it" \
     || fail "lid open: monitors '$(monitors)' rail '$(layer rice-rail)' reserved '$(reserved)'"
 
@@ -162,9 +177,9 @@ two_huds() { [[ "$(nlayer rice-hud)" == 2 ]]; }
 wait_for 25 two_huds || true
 read -r dcx dcy < <(hud_center DP-1)
 read -r ecx ecy < <(hud_center eDP-1)
-echo "  HUD centres: DP-1 $dcx,$dcy  eDP-1 $ecx,$ecy (free areas: DP-1 x 0-1920 y 26-1080, eDP-1 x $ex-$((ex + 1488)) y 26-1080)"
+echo "  HUD centres: DP-1 $dcx,$dcy  eDP-1 $ecx,$ecy (free areas: DP-1 x 0-1920 y 32-1080, eDP-1 x $ex-$((ex + 1482)) y 32-1080)"
 python3 -I -c 'import sys; a = list(map(float, sys.argv[1:])); ex = a[4]
-sys.exit(not (abs(a[0] - 960) <= 1 and abs(a[1] - 553) <= 1 and abs(a[2] - (ex + 744)) <= 1 and abs(a[3] - 553) <= 1))' \
+sys.exit(not (abs(a[0] - 960) <= 1 and abs(a[1] - 556) <= 1 and abs(a[2] - (ex + 741)) <= 1 and abs(a[3] - 556) <= 1))' \
     "$dcx" "$dcy" "$ecx" "$ecy" "$ex" \
     && pass "one HUD per screen, centred below the bar (DP-1) and left of the rail (eDP-1)" || fail "HUD placement: $(layer rice-hud)"
 lvl=$(H layers -j | python3 -I -c '
@@ -185,10 +200,13 @@ kgeo=$(H clients -j | python3 -I -c '
 import json, sys
 for c in json.load(sys.stdin):
     if c["title"] == "rig-kitty":
-        print(c["monitor"], c["at"][0], c["size"][0])')
-read -r kmon kx kw <<<"${kgeo:-x 0 0}"
-[[ "$kmon" == 1 && $((kx + kw)) -le $((ex + 1488)) && $((kx + kw)) -ge $((ex + 1460)) ]] \
-    && pass "kitty on eDP-1 tiles up to the rail ($((kx + kw)) <= $((ex + 1488)))" || fail "kitty geometry: '$kgeo'"
+        print(c["monitor"], c["at"][0], c["at"][1], c["size"][0], c["size"][1])')
+read -r kmon kx ky kw kh <<<"${kgeo:-x 0 0 0 0}"
+# The 1 px border is drawn just outside at/size: border box x 6..1476, y 38..1074, so
+# 6 px of wallpaper between it and the screen edge (left, bottom), the bar (32) and the
+# rail (1482), the same gaps_out everywhere.
+[[ "$kmon" == 1 && $((kx - 1)) == $((ex + 6)) && $((ky - 1)) == 38 && $((kx + kw + 1)) == $((ex + 1476)) && $((ky + kh + 1)) == 1074 ]] \
+    && pass "kitty on eDP-1: border box 6..1476 x 38..1074, 6 px from the edge, the bar and the rail" || fail "kitty geometry: '$kgeo'"
 sleep 0.5
 "$R/qs-run.sh" shot eDP-1 "$SHOTS/rail-kitty-eDP-1.png" >/dev/null
 kill -TERM "$kitty_pid" 2>/dev/null || true
@@ -234,11 +252,11 @@ echo "  rail: $(pj "d['rail']")"
 import json, sys
 r = json.loads(sys.argv[1])
 s = r["sections"]
-ok = (s[0][0] == "sys" and s[0][1] < 100 and s[-1][0] == "claude"
-      and abs(r["lastBottom"] - r["clipHeight"]) <= 2 and r["spark"][1] >= 100
-      and r["columnImplicit"] <= r["clipHeight"])
+ok = ([x[0] for x in s] == ["sys", "disk", "volume", "bluetooth", "claude"] and s[0][1] < 10
+      and abs(r["lastBottom"] - r["clipHeight"]) <= 2 and 40 <= r["spark"][1] <= 60
+      and r["columnImplicit"] <= r["clipHeight"] and min(r["rowHeights"]) >= 18)
 sys.exit(not ok)' "$(pj "json.dumps(d['rail'])")" \
-    && pass "rail layout: SYS at the top, CLAUDE ends at the bottom edge ($(pj "d['rail']['lastBottom']") of $(pj "d['rail']['clipHeight']") px), the graph grew to $(pj "d['rail']['spark'][1]") px" \
+    && pass "rail layout: SYS, DISK, VOLUME, BLUETOOTH, CLAUDE (no clock, no media without a player); CLAUDE ends at the bottom edge ($(pj "d['rail']['lastBottom']") of $(pj "d['rail']['clipHeight']") px); graph capped at $(pj "d['rail']['spark'][1]") px; SYS rows $(pj "d['rail']['rowHeights']") px high" \
     || fail "rail layout: $(pj "d['rail']")"
 
 # d. CPU temperature: probe order, two readings, warn, unknown and garbage values.
@@ -295,6 +313,120 @@ wait_for 25 temp_is -1 && [[ "$(tj "['path']")" == "" && "$(tj "['row']['text']"
 [[ "$(ipc probe parseTemp 48875) $(ipc probe parseTemp ' 100000') $(ipc probe parseTemp '') $(ipc probe parseTemp 4x)" == "48.875 100 -1 -1" ]] \
     && pass "parseTemp fixtures" || fail "parseTemp"
 "$R/qs-run.sh" shot eDP-1 "$SHOTS/rail-probe-eDP-1.png" >/dev/null
+
+# e. DISK. The real df ran once at start: '/' is the first row.
+LINE_C="#1b1d30"
+DIM_C="#6a7399"
+[[ "$(pj "d['disk']['rows'][0]['label'] if d['disk']['rows'] else None")" == / ]] \
+    && pass "real df at start: DISK rows $(pj "[(r['label'], r['text']) for r in d['disk']['rows']]")" || fail "real df: $(pj "d['disk']")"
+fixture='Filesystem          Type     1-blocks          Used     Available Capacity Mounted on
+/dev/mapper/vg-root ext4   52655943680   42468913152    7679193088      85% /
+/dev/nvme0n1p1      vfat    1020702720     581177344     439525376      57% /boot
+/dev/sda1           btrfs 2000000000000 1900000000000   40000000000      98% /mnt/big data
+/dev/sda1           btrfs 2000000000000 1900000000000   40000000000      98% /mnt/snap
+//nas/share         cifs   274877906944    7478444032  267399462912       3% /mnt/nas
+/dev/loop0          squashfs       100           100             0     100% /snap/x
+tmpfs               tmpfs   8000000000      10000000    7990000000       1% /tmp
+garbage line
+/dev/sdb1           ext4           abc             1             2       3% /broken
+/dev/sdc1           xfs              0             0             0       0% /empty
+/dev/sdd1           f2fs  500000000000            10  499999999990       1% relative
+/dev/sde1           ext4  400000000000  380000000000   20000000000      95% /data'
+[[ "$(ipc probe parseDf "$fixture")" == '[["/","ext4",85,"40/49G"],["/mnt/big data","btrfs",98,"1.7/1.8T"],["/data","ext4",95,"354/373G"]]' ]] \
+    && pass "parseDf: '/' first, then by size, max 3, one row per device (subvolume twice), cifs/squashfs/tmpfs/garbage/non-numeric/zero size/relative skipped, a mount point with a space" \
+    || fail "parseDf: $(ipc probe parseDf "$fixture")"
+[[ "$(ipc probe parseDf '') $(ipc probe parseDf 'Filesystem Type 1-blocks Used Available Capacity Mounted on') $(ipc probe parseDf 'df: no file systems processed')" == "[] [] []" ]] \
+    && pass "parseDf: empty, header only and the df error text give no rows" || fail "parseDf empty"
+[[ "$(ipc probe diskText)" == '["0.6/1.0G","39/49G","145/786G","1.2/1.8T","512/900M","0.0/0.0M"]' ]] \
+    && pass "diskText fixtures (unit of the total, one decimal below 10)" || fail "diskText: $(ipc probe diskText)"
+# A fake df that logs each run: one df per refresh, on the shared tick only.
+printf '%s\n' "$fixture" >"$tmp/df.out"
+printf '#!/bin/sh\necho run >>"%s"\ncat "%s"\n' "$tmp/df.log" "$tmp/df.out" >"$tmp/fake-df"
+chmod +x "$tmp/fake-df"
+ipc probe setDf "$tmp/fake-df"
+ipc probe refreshDisks
+dj() { pj "d['disk']$1"; }
+disk_rows_are() { [[ "$(dj "['n']")" == "$1" ]]; }
+wait_for 25 disk_rows_are 3 || true
+[[ "$(pj "[(r['label'], r['text'], r['lit'], r['warn'], r['colors']) for r in d['disk']['rows']]")" \
+    == "[('/', '40/49G  85%', 9, False, ['$A1_C', '$LINE_C']), ('/mnt/big data', '1.7/1.8T  98%', 10, True, ['$WARN_C']), ('/data', '354/373G  95%', 10, True, ['$WARN_C'])]" ]] \
+    && pass "DISK rows from the fake df: '/ 40/49G 85%' a1, 98% and 95% in the warn colour (>= 90%)" \
+    || fail "DISK rows: $(dj "['rows']")"
+"$R/qs-run.sh" shot eDP-1 "$SHOTS/rail-disk-eDP-1.png" >/dev/null
+: >"$tmp/df.log"
+sleep 10
+runs=$(grep -c . "$tmp/df.log" || true)
+[[ "$runs" == 0 ]] && pass "no df within 10 s (5 shared ticks): not one per tick" || fail "df ran $runs times in 10 s"
+ipc probe setDiskEvery 2
+: >"$tmp/df.log"
+sleep 8.2
+runs=$(grep -c . "$tmp/df.log" || true)
+[[ "$runs" -ge 1 && "$runs" -le 3 ]] && pass "diskEvery 2: $runs df runs in 8 s (every 2nd tick, one short-lived process each)" || fail "diskEvery 2: $runs runs"
+ipc probe setDiskEvery 30
+printf 'Filesystem Type 1-blocks Used Available Capacity Mounted on\n/dev/x ext4 1000 990 10 99%% /\n' >"$tmp/df.out"
+ipc probe refreshDisks
+disk_one() { [[ "$(pj "[r['text'] for r in d['disk']['rows']]")" == "['0.0/0.0M  99%']" ]]; }
+wait_for 25 disk_one && pass "a later df output replaces the rows (one row, 99%)" || fail "disk update: $(dj "")"
+: >"$tmp/df.out"
+ipc probe refreshDisks
+wait_for 25 disk_rows_are 0 && [[ "$(dj "['texts']")" == "['//', 'DISK', 'no data']" ]] \
+    && pass "df prints nothing: DISK shows 'no data'" || fail "disk empty: $(dj "")"
+printf '%s\n' "$fixture" >"$tmp/df.out"
+ipc probe refreshDisks
+wait_for 25 disk_rows_are 3 || fail "disk fixture back"
+
+# f. VOLUME on the private PipeWire (fake-pipewire.sh: rig_sink_buds is the default).
+PW() { "$R/fake-pipewire.sh" "$1" "$tmp/pw" "${@:2}"; }
+vj() { pj "d['volume']$1"; }
+vol_is() { [[ "$(pj "$1")" == "$2" ]]; }
+out_row="[(r['label'], r['text'], r['lit'], r['colors']) for r in d['volume']['rows']]"
+wait_for 25 vol_is "d['volume']['texts']" "['//', 'VOLUME', 'Rig AirPods Pro Wireless Stereo Headphones', 'OUT', '100%', 'no streams']" \
+    && [[ "$(pj "$out_row")" == "[('OUT', '100%', 10, ['$A1_C'])]" ]] \
+    && pass "default sink: friendly name, OUT 100% (10 lit), 'no streams'" || fail "volume start: $(vj "")"
+read -r buds analog < <(PW pw pw-dump | python3 -I -c 'import json, sys
+n = {o["info"]["props"].get("node.name"): o["id"] for o in json.load(sys.stdin) if o["type"].endswith(":Node")}
+print(n["rig_sink_buds"], n["rig_sink_analog"])')
+PW volume "$buds" 0.64
+wait_for 25 vol_is "$out_row" "[('OUT', '64%', 6, ['$A1_C', '$LINE_C'])]" \
+    && pass "sink volume 0.64 (as wpctl shows it): OUT 64%, 6 of 10 lit" || fail "volume 64: $(pj "$out_row")"
+PW mute "$buds" true
+wait_for 25 vol_is "$out_row" "[('OUT', 'MUTED', 6, ['$DIM_C', '$LINE_C'])]" \
+    && pass "muted: 'MUTED', the bar dimmed" || fail "muted: $(pj "$out_row")"
+PW mute "$buds" false
+PW default rig_sink_analog
+wait_for 25 vol_is "d['volume']['texts'][2:5]" "['Built-in Audio Analog Stereo', 'OUT', '100%']" \
+    && pass "default sink switched: 'Built-in Audio Analog Stereo' 100%" || fail "switch: $(vj "")"
+PW default --
+wait_for 25 vol_is "d['volume']['texts']" "['//', 'VOLUME', 'no output', 'no streams']" \
+    && pass "no default sink: 'no output'" || fail "no sink: $(vj "")"
+PW default rig_sink_buds
+s1=$(PW stream "Firefox" 0.55)
+PW stream "Spotify" 0.8 >/dev/null
+s3=$(PW stream "<b>mpv</b><img src=\"http://127.0.0.1:9/x.png\">" 0.3)
+wait_for 25 vol_is "d['volume']['texts'][5:]" "['Firefox', '55%', 'Spotify', '80%', '<b>mpv</b><img src=\"http://127.0.0.1:9/x.png\">', '30%']" \
+    && [[ "$(pj "(d['volume']['meters'], d['volume']['plain'], d['volume']['texts'][1])")" == "([3, 4, 2], 0, 'VOLUME')" ]] \
+    && pass "three streams: 'Firefox 55%', 'Spotify 80%' and a markup name shown literally (plain text), 5-cell meters 3/4/2" \
+    || fail "streams: $(vj "")"
+"$R/qs-run.sh" shot eDP-1 "$SHOTS/rail-volume-eDP-1.png" >/dev/null
+s4=$(PW stream "Discord" 1.0)
+wait_for 25 vol_is "(d['volume']['streams'], len(d['volume']['meters']), d['volume']['texts'][2])" "(4, 3, '4 streams')" \
+    && pass "four streams: three rows, '4 streams' in the heading" || fail "four streams: $(vj "")"
+PW volume "$s1" 0.2
+PW mute "$s3" true
+wait_for 25 vol_is "d['volume']['texts'][6:]" "['Firefox', '20%', 'Spotify', '80%', '<b>mpv</b><img src=\"http://127.0.0.1:9/x.png\">', 'muted']" \
+    && pass "stream volume and mute changes show (20%, 'muted')" || fail "stream change: $(vj "")"
+PW destroy "$s1"
+PW destroy "$s3"
+PW destroy "$s4"
+wait_for 25 vol_is "d['volume']['texts'][5:]" "['Spotify', '80%']" && pass "streams gone: their rows go" || fail "destroy: $(vj "")"
+
+# g. BLUETOOTH is always shown (the real adapter, read only: one of the three empty
+#    texts, or connected rows).
+bt=$(pj "(d['bt']['visible'], d['bt']['texts'][:2], d['bt']['texts'][2] if len(d['bt']['texts']) > 2 else '')")
+echo "  bluetooth: $bt"
+[[ "$bt" =~ ^\(True,\ \[\'//\',\ \'BLUETOOTH\'\],\ \'(no adapter|bluetooth off|no devices connected|[0-9]+ connected)\'\)$ ]] \
+    && pass "BLUETOOTH always visible (here: ${BASH_REMATCH[1]})" || fail "bluetooth: $bt"
+"$R/qs-run.sh" shot eDP-1 "$SHOTS/rail-final-eDP-1.png" >/dev/null
 temp_warns=$("$R/qs-run.sh" log | grep -c 'WARN qml: Stats: cannot read' || true)
 [[ "$temp_warns" -le 1 ]] && pass "temperature failures logged at most once ($temp_warns)" || fail "temp warnings: $temp_warns"
 "$R/qs-run.sh" stop >/dev/null

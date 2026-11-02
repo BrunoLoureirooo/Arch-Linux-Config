@@ -9,6 +9,9 @@
 //   qs-run.sh ipc call probe setTempPath <file>  -> Stats.tempPath
 //   qs-run.sh ipc call probe scanTemp <hwmon-root> <thermal-root>   -> re-run the probe
 //   qs-run.sh ipc call probe parseTemp <text>    -> Stats.parseTemp
+//   qs-run.sh ipc call probe setDf <program> | setDiskEvery <ticks> | refreshDisks
+//   qs-run.sh ipc call probe parseDf <df output> | diskText   -> Stats disk helpers
+// get also reports the DISK, VOLUME and BLUETOOTH sections (texts, StatRows).
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -125,7 +128,7 @@ ShellRoot {
             const r = shell.rail();
             const c = r ? r.contentItem : null;
             const clip = shell.find(c, i => i.clip === true);
-            // Section headings (SectionLabel: text + note), the clock digits, the sparkline.
+            // Section headings (SectionLabel: text + note) and the sparkline.
             const heads = shell.findAll(c, i => i.note !== undefined && typeof i.text === "string" && i.visible, []);
             const spark = shell.find(c, i => i.samples !== undefined && i.peak !== undefined);
             const tmp = shell.find(c, i => i.label === "TMP" && i.value !== undefined);
@@ -138,8 +141,29 @@ ShellRoot {
                 columnImplicit: clip.children[0].implicitHeight,
                 sections: heads.map(hd => [hd.text, top(hd)]),
                 lastBottom: heads.length ? Math.max(...heads.map(hd => bottom(hd.parent))) : -1,
-                spark: spark ? [top(spark), Math.round(spark.height)] : null
+                spark: spark ? [top(spark), Math.round(spark.height)] : null,
+                // Heights of the visible SYS rows (CPU, MEM, GPU, VRM, TMP).
+                rowHeights: shell.findAll(c, i => ["CPU", "MEM", "GPU", "VRM", "TMP"].includes(i.label) && i.litColor !== undefined && i.visible, [])
+                    .map(i => Math.round(i.height))
             };
+            // DISK and VOLUME sections: visible texts, and per StatRow its label, text,
+            // lit count and segment colours.
+            const statRows = sec => shell.findAll(sec, i => i.label !== undefined && i.litColor !== undefined && i.visible, []).map(row => {
+                const sg = shell.find(row, i => i.lit !== undefined && i.cell !== undefined);
+                return { label: row.label, text: row.text, lit: sg.lit, warn: row.warn,
+                    colors: [...new Set(sg.children.filter(s => s.color !== undefined).map(s => String(s.color)))] };
+            });
+            const disk = shell.find(c, i => i.mounts !== undefined);
+            const vol = shell.find(c, i => i.allStreams !== undefined);
+            const bt = shell.find(c, i => i.devices !== undefined && i.emptyText !== undefined);
+            out.disk = disk ? { texts: shell.texts(disk), rows: statRows(disk), ticks: Stats.diskTicks,
+                every: Stats.diskEvery, n: Stats.disks.length } : null;
+            out.volume = vol ? { texts: shell.texts(vol), rows: statRows(vol), streams: vol.allStreams.length,
+                hasSink: vol.hasSink,
+                plain: shell.findAll(vol, i => typeof i.text === "string" && i.font !== undefined && i.visible, [])
+                    .filter(t => t.textFormat !== Text.PlainText && /[<&]/.test(t.text)).length,
+                meters: shell.findAll(vol, i => i.cells !== undefined && i.visible, []).map(m => m.lit) } : null;
+            out.bt = bt ? { visible: bt.visible, texts: shell.texts(bt) } : null;
             out.temp = {
                 c: Stats.cpuTempC, path: Stats.tempPath,
                 row: tmp ? { text: tmp.text, lit: segs.lit, warn: tmp.warn, known: tmp.known,
@@ -160,6 +184,30 @@ ShellRoot {
 
         function parseTemp(text: string): string {
             return String(Stats.parseTemp(text));
+        }
+
+        // Disk usage: the df command (one program, no arguments: a fake df script),
+        // the refresh period in ticks, an immediate refresh, the pure helpers.
+        function setDf(program: string): void {
+            Stats.dfCommand = [program];
+        }
+
+        function setDiskEvery(ticks: int): void {
+            Stats.diskEvery = ticks;
+        }
+
+        function refreshDisks(): void {
+            Stats.refreshDisks();
+        }
+
+        function parseDf(text: string): string {
+            return JSON.stringify(Stats.parseDf(text).map(d => [d.mount, d.type, d.pct, Stats.diskText(d.used, d.size)]));
+        }
+
+        function diskText(): string {
+            const G = 1024 ** 3;
+            return JSON.stringify([[0.6 * G, 1.0 * G], [39.4 * G, 49 * G], [145 * G, 786 * G], [1.2 * 1024 * G, 1.8 * 1024 * G],
+                [512 * 1048576, 900 * 1048576], [0, 0]].map(p => Stats.diskText(p[0], p[1])));
         }
     }
 }

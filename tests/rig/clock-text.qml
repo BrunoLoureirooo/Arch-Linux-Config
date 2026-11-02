@@ -1,7 +1,7 @@
 // Clock and untrusted-text probe (test config only, never part of production). Bars on
 // every screen and the rail on the main screen, as in shell.qml, plus an IpcHandler:
 //   tests/rig/qs-run.sh start --entry tests/rig/clock-text.qml
-//   qs-run.sh ipc call probe clock         -> every visible text of the bars and the rail clock
+//   qs-run.sh ipc call probe clock         -> every visible text of the bars (rail: null, it has no clock)
 //   qs-run.sh ipc call probe mock <ms>     -> Clock.source returns that UTC instant from now on
 //   qs-run.sh ipc call probe real          -> Clock.source back to the real time
 //   qs-run.sh ipc call probe untrusted     -> every Text in bars and rail whose string holds '<':
