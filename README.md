@@ -20,7 +20,7 @@ Personal Arch Linux dotfiles managed with [chezmoi](https://www.chezmoi.io/).
 | `~/.config/wofi/` | Wofi launcher config and stylesheet (retired by the Quickshell launcher, kept for rollback) |
 | `~/.config/nvim/` | Neovim config via [LazyVim](https://lazyvim.org/) |
 | `~/.config/btop/` | btop system monitor config |
-| `tests/` | Unit tests (`lua tests/lua/*.lua`, `python3 -m unittest discover -s tests -p 'test_*.py'`) and `tests/rig/`, a private headless nested-Hyprland rig for testing the shell without touching the live session (`selftest.sh`, `selftest-qs.sh`, `selftest-rail.sh` for the rail placement/toggle/layout and gaps, the CPU temperature, DISK, VOLUME (on a private PipeWire, `fake-pipewire.sh`) and BLUETOOTH sections and the empty-workspace clock). Not deployed |
+| `tests/` | Unit tests (`lua tests/lua/*.lua`, `python3 -m unittest discover -s tests -p 'test_*.py'`) and `tests/rig/`, a private headless nested-Hyprland rig for testing the shell without touching the live session (`selftest.sh`, `selftest-qs.sh`, `selftest-rail.sh` for the rail placement/toggle/layout, inner padding and gaps, the CPU temperature, DISK, VOLUME (on a private PipeWire, `fake-pipewire.sh`) and BLUETOOTH sections and the empty-workspace clock). Not deployed |
 | `docs/` | [Deployment guide](docs/deploy.md), [Claude limits setup](docs/claude-statusline.md), [design reference](docs/superpowers/design/) (render page and mock screenshots), spec, plan and notes under `docs/superpowers/`. Not deployed |
 
 ## Install

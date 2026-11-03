@@ -309,14 +309,17 @@ Do these in order. Anything that fails: note it, and use section 13 if the deskt
    moved pool, pick that slot with `Ctrl+N` and hop again. Check it: unplug the BenQ (or
    `~/.local/bin/lid close` for the other direction), hop, see the windows, plug back in.
 6. **Bar and rail on both screens.** A bar on the top of each screen showing its own five workspaces
-   (active filled, occupied underlined; bar right side: VOL, NET, BAT). The rail (no clock: SYS meters
-   CPU/MEM/GPU/TMP and a small network graph at the top, then DISK, VOLUME, MEDIA while something plays,
-   BLUETOOTH and CLAUDE down to the bottom edge, so it fills the screen height) only on the laptop panel (`eDP-1`, chosen by output name, not focus). With
+   (active filled, occupied underlined; bar right side: VOL, NET, BAT). The rail (no clock: SYS with large
+   CPU and MEM readouts, GPU/TMP rows and a framed network graph at the top, then DISK, VOLUME, MEDIA
+   while something plays, BLUETOOTH, and CLAUDE on the bottom edge; sections are packed with one fixed gap,
+   the graph grows into spare height and any rest sits above CLAUDE; content is inset from the rail's
+   border, nothing touches it) only on the laptop panel (`eDP-1`, chosen by output name, not focus). With
    the lid closed (`eDP-1` disabled) it moves to the BenQ, and back when the lid opens. CPU and MEM are
    only in the rail now, so with the rail hidden or on the other screen those numbers are not on every
    screen. TMP is the CPU temperature (k10temp `Tctl` here; read from sysfs on the shared 2 s tick).
    DISK lists `/` first and at most two more local ext4/btrfs/xfs/f2fs/vfat filesystems (`/home`, `/boot`
-   here) as `used/total NN%`, warn colour from 90 %; compare with `df -h` (it refreshes once a minute).
+   here), each row labelled with its full mount point (ellipsized in the middle when too long, the
+   filesystem type beside it when it fits), as `used/total NN%`, warn colour from 90 %; compare with `df -h` (it refreshes once a minute).
    VOLUME shows the default output's name (play something on the AirPods and on the speakers and see the
    name follow), its volume (compare `wpctl get-volume @DEFAULT_AUDIO_SINK@`; it reads `MUTED` when
    muted) and up to three playing apps with their own volume (`no streams` when nothing plays).
