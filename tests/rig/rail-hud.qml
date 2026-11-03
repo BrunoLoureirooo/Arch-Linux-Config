@@ -135,9 +135,19 @@ ShellRoot {
             const segs = tmp ? shell.find(tmp, i => i.lit !== undefined && i.cell !== undefined) : null;
             const top = i => Math.round(i.mapToItem(clip, 0, 0).y);
             const bottom = i => Math.round(i.mapToItem(clip, 0, i.height).y);
+            // Sections top to bottom: [top, bottom] of each section (the heading's parent).
+            const secs = heads.map(hd => [top(hd.parent), bottom(hd.parent)]);
             out.rail = r === null ? null : {
                 screen: r.screen.name,
                 clipHeight: clip.height,
+                // Inner padding: the content area's inset from the rail's left, top,
+                // right and bottom edges.
+                pad: [Math.round(clip.mapToItem(c, 0, 0).x), Math.round(clip.mapToItem(c, 0, 0).y),
+                    Math.round(c.width - clip.mapToItem(c, clip.width, 0).x),
+                    Math.round(c.height - clip.mapToItem(c, 0, clip.height).y)],
+                // Gaps between consecutive sections (the last one, above CLAUDE, takes
+                // the spare height).
+                gaps: secs.slice(1).map((s2, i) => s2[0] - secs[i][1]),
                 columnImplicit: clip.children[0].implicitHeight,
                 sections: heads.map(hd => [hd.text, top(hd)]),
                 lastBottom: heads.length ? Math.max(...heads.map(hd => bottom(hd.parent))) : -1,
@@ -150,7 +160,11 @@ ShellRoot {
             // lit count and segment colours.
             const statRows = sec => shell.findAll(sec, i => i.label !== undefined && i.litColor !== undefined && i.visible, []).map(row => {
                 const sg = shell.find(row, i => i.lit !== undefined && i.cell !== undefined);
+                // The label Text (children[0]): cut short? elide mode; the sub text when shown.
+                const lt = row.children[0];
                 return { label: row.label, text: row.text, lit: sg.lit, warn: row.warn,
+                    truncated: lt.truncated, elide: lt.elide,
+                    sub: row.children[3] && row.children[3].visible ? row.children[3].text : "",
                     colors: [...new Set(sg.children.filter(s => s.color !== undefined).map(s => String(s.color)))] };
             });
             const disk = shell.find(c, i => i.mounts !== undefined);

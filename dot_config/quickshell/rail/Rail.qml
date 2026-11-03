@@ -32,6 +32,10 @@ PanelWindow {
     // The render's rail font is 0.82em of the 12px screen font (the bar's is 0.84em).
     readonly property real px: Math.round(Theme.px * 0.82)
     readonly property int barHeight: 26
+    // Spacing scale: inner padding (x, y) and the gap between sections.
+    readonly property int padX: Math.round(Theme.px * 1.2)
+    readonly property int padY: Math.round(Theme.px * 1.0)
+    readonly property int sectionGap: Math.round(Theme.px * 1.5)
 
     anchors { top: true; bottom: true; right: true }
     margins { top: Theme.gapOut + barHeight + Theme.gapOut; right: Theme.gapOut; bottom: Theme.gapOut }
@@ -58,34 +62,48 @@ PanelWindow {
         hot: true
         cut: 10
 
+        // Inner padding: content 1.2em (screen font) in from the left/right border and
+        // 1em from the top/bottom, clear of the cut corners.
         Item {
             anchors.fill: parent
-            anchors.topMargin: Math.round(rail.px * 0.55)
-            anchors.bottomMargin: Math.round(rail.px * 0.55)
-            anchors.leftMargin: Math.round(rail.px * 0.8)
-            anchors.rightMargin: Math.round(rail.px * 0.8)
+            anchors.topMargin: rail.padY
+            anchors.bottomMargin: rail.padY
+            anchors.leftMargin: rail.padX
+            anchors.rightMargin: rail.padX
             clip: true
 
-            // Full height: SYS at the top, CLAUDE at the bottom edge, DISK, VOLUME,
-            // MEDIA (only while a player exists) and BLUETOOTH between them. Every
-            // section has its natural (fixed) height; the spare height is shared evenly
-            // by the gaps between the shown sections (no section stretches).
+            // Full height, packed from the top with one section gap between sections:
+            // SYS, DISK, VOLUME, MEDIA (only while a player exists), BLUETOOTH, and
+            // CLAUDE on the bottom edge. Spare height goes first to the SYS network
+            // plot (up to its maximum, see SysWidget), the rest to one gap above CLAUDE.
             ColumnLayout {
                 id: column
                 anchors.fill: parent
-                spacing: Math.round(rail.px * 0.5)
+                spacing: rail.sectionGap
 
-                SysWidget { Layout.fillWidth: true; px: rail.px }
-                Item { Layout.fillHeight: true }
+                SysWidget {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    px: rail.px
+                    note: rail.screen ? rail.screen.name : ""
+                }
                 DiskWidget { Layout.fillWidth: true; px: rail.px }
-                Item { Layout.fillHeight: true }
                 VolumeWidget { Layout.fillWidth: true; px: rail.px }
-                Item { Layout.fillHeight: true }
-                MediaWidget { id: media; Layout.fillWidth: true; px: rail.px }
-                Item { Layout.fillHeight: true; visible: media.visible }
+                MediaWidget { Layout.fillWidth: true; px: rail.px }
                 BluetoothWidget { Layout.fillWidth: true; px: rail.px }
-                Item { Layout.fillHeight: true }
-                ClaudeWidget { Layout.fillWidth: true; px: rail.px }
+                // CLAUDE sits on the bottom edge of the spare height.
+                Item {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.minimumHeight: claude.implicitHeight
+                    implicitHeight: claude.implicitHeight
+
+                    ClaudeWidget {
+                        id: claude
+                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                        px: rail.px
+                    }
+                }
             }
         }
     }

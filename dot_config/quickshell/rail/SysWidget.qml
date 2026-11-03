@@ -1,23 +1,31 @@
-// Rail SYS section (render .row3 .sg .spw .netl): CPU, MEM, GPU, TMP rows as
-// `LABEL [10 segments] value` (GPU hidden when Stats has no GPU source or no value;
-// TMP is the CPU temperature, bar 30-100 °C, warn from 85 °C, `--` when unknown),
-// plus a VRM row (`1.0/4.0G`) while the GPU source is the NVIDIA stream; then the
-// network sparkline over Stats.netHistory (one polyline over a faint a1 area, a2 end
-// dot, scaled to the window's maximum) and the caption `up <rate>  <iface>  down <rate>`.
-// The rows are the rail's thick rows (StatRow at rowPx); the sparkline has a fixed
-// height of about two rows, so spare rail height goes to the spacing between sections.
+// Rail SYS section (render .row3 .sg .spw .netl). Two hero readouts side by side in thin
+// cut-corner frames: CPU (busy %) and MEM (used GiB, the used % as a small note), each
+// a large value over a 20-cell bar. Under them inline rows `LABEL [10 segments] value`:
+// GPU (hidden when Stats has no GPU source or no value), VRM (`1.0/4.0G`, only while the
+// GPU source is the NVIDIA stream) and TMP (the CPU temperature, bar 30-100 °C, warn from
+// 85 °C, `--` when unknown). Then the network sparkline over Stats.netHistory in a
+// framed plot (quarter grid lines, a tick every 6 samples, the window's peak rate at the
+// top right; one polyline over a faint a1 area, a2 end dot, scaled to that peak) and
+// the caption `▲ <up>  <iface>  ▼ <down>`. The plot takes spare rail height between
+// graphMin and graphMax (Rail.qml), so the rail fills without a void.
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Shapes
 import qs
+import qs.components
 import qs.services
 
 ColumnLayout {
     id: root
 
     property real px: Theme.px
-    // Font size of the stat rows (thicker than the rail's base size).
-    property real rowPx: Math.round(px * 1.7)
+    property string note
+    // Font sizes: inline rows, hero values, captions.
+    property real rowPx: Math.round(px * 1.5)
+    property real heroPx: Math.round(px * 2.9)
+    readonly property real capPx: Math.round(px * 1.0)
+    readonly property real graphMin: Math.round(rowPx * 4.4)
+    readonly property real graphMax: Math.round(rowPx * 14)
     readonly property bool vram: Stats.gpuSource === "nvidia"
     // Value column, the same for every row so the bars line up: wide enough for the
     // VRM text while that row is shown.
@@ -35,32 +43,73 @@ ColumnLayout {
         id: vramMetrics
         font.family: Theme.font
         font.pixelSize: root.rowPx
+        font.weight: Font.Medium
         text: "0.0/0.0G"
     }
 
-    spacing: Math.round(rowPx * 0.45)
+    spacing: Math.round(px * 0.6)
+
+    // A hero tile: thin cut-corner frame, equal halves of the row.
+    component Tile: Chamfer {
+        Layout.fillWidth: true
+        Layout.preferredWidth: 1  // equal halves
+        implicitHeight: Math.round(root.heroPx * 1.35) + 2 * pad
+        readonly property real pad: Math.round(root.px * 0.8)
+        cut: Math.round(root.px * 0.7)
+        stroke: Theme.line
+    }
+
+    // Plot labels.
+    component Tiny: Text {
+        color: Theme.dim
+        font.family: Theme.font
+        font.pixelSize: Math.max(9, Math.round(root.px * 0.9))
+        font.letterSpacing: root.px * 0.1
+    }
+
 
     SectionLabel {
         Layout.fillWidth: true
-        Layout.bottomMargin: Math.round(root.px * 0.15)
+        Layout.bottomMargin: Math.round(root.px * 0.3)
         px: root.px
         text: "sys"
+        note: root.note
     }
 
-    StatRow {
-        px: root.rowPx
-        valueWidth: root.valueWidth
-        label: "CPU"
-        value: Stats.cpu
-        text: Math.round(Stats.cpu) + "%"
-    }
+    // Hero readouts.
+    RowLayout {
+        Layout.fillWidth: true
+        Layout.bottomMargin: Math.round(root.px * 0.3)
+        spacing: Math.round(root.px * 1.0)
 
-    StatRow {
-        px: root.rowPx
-        valueWidth: root.valueWidth
-        label: "MEM"
-        value: Stats.memPct
-        text: Stats.memGb.toFixed(1) + "G"
+        Tile {
+            id: cpuTile
+            StatRow {
+                anchors { fill: parent; margins: cpuTile.pad; leftMargin: cpuTile.pad + 2; rightMargin: cpuTile.pad + 2 }
+                hero: true
+                segments: 20
+                px: root.heroPx
+                label: "CPU"
+                valueColor: warn ? Theme.warn : Theme.a1
+                value: Stats.cpu
+                text: Math.round(Stats.cpu) + "%"
+            }
+        }
+
+        Tile {
+            id: memTile
+            StatRow {
+                anchors { fill: parent; margins: memTile.pad; leftMargin: memTile.pad + 2; rightMargin: memTile.pad + 2 }
+                hero: true
+                segments: 20
+                px: root.heroPx
+                label: "MEM"
+                valueColor: warn ? Theme.warn : Theme.a1
+                sub: Math.round(Stats.memPct) + "%"
+                value: Stats.memPct
+                text: Stats.memGb.toFixed(1) + "G"
+            }
+        }
     }
 
     StatRow {
@@ -92,64 +141,117 @@ ColumnLayout {
         text: known ? Math.round(temp) + "C" : "--"
     }
 
-    // Sparkline. Points are recomputed only when netHistory changes (every 2 s).
-    Item {
-        id: spark
+    // Framed network plot.
+    Chamfer {
+        id: plotFrame
         Layout.fillWidth: true
-        Layout.topMargin: Math.round(root.px * 0.2)
-        // About two stat rows high.
-        implicitHeight: Math.round(root.rowPx * 1.33 * 2 + root.spacing)
+        Layout.fillHeight: true
+        Layout.topMargin: Math.round(root.px * 0.5)
+        Layout.minimumHeight: root.graphMin
+        Layout.preferredHeight: root.graphMin
+        Layout.maximumHeight: root.graphMax
+        cut: Math.round(root.px * 0.7)
+        stroke: Theme.line
 
-        readonly property var samples: Stats.netHistory
-        readonly property real peak: Math.max(1, ...samples)
-        readonly property var points: {
-            const n = samples.length;
-            if (n < 2 || width <= 0)
-                return [];
-            const h = height;
-            return samples.map((v, i) => Qt.point(i * width / (n - 1), h - 1 - v / peak * (h - 3)));
-        }
+        Item {
+            id: plot
+            anchors { fill: parent; margins: 1 }
 
-        Shape {
-            anchors.fill: parent
-            visible: spark.points.length >= 2
-            preferredRendererType: Shape.CurveRenderer
-
-            ShapePath {
-                strokeWidth: -1
-                fillColor: Qt.alpha(Theme.a1, 0.14)
-                PathPolyline {
-                    path: spark.points.length >= 2
-                        ? [Qt.point(0, spark.height)].concat(spark.points, [Qt.point(spark.width, spark.height)])
-                        : []
+            // Quarter grid lines and a tick every 6 samples (12 s on the 2 s tick).
+            Repeater {
+                model: 3
+                Rectangle {
+                    required property int index
+                    y: Math.round(plot.height * (index + 1) / 4)
+                    width: plot.width
+                    height: 1
+                    color: Theme.line
+                    opacity: 0.7
+                }
+            }
+            Repeater {
+                model: Math.max(0, Math.floor((Stats.historyLength - 1) / 6))
+                Rectangle {
+                    required property int index
+                    x: Math.round((index + 1) * 6 * plot.width / (Stats.historyLength - 1))
+                    y: plot.height - height
+                    width: 1
+                    height: Math.round(root.px * 0.5)
+                    color: Theme.dim
+                    opacity: 0.6
                 }
             }
 
-            ShapePath {
-                strokeColor: Theme.a1
-                strokeWidth: 1.2
-                fillColor: "transparent"
-                capStyle: ShapePath.FlatCap
-                joinStyle: ShapePath.RoundJoin
-                PathPolyline { path: spark.points }
+            Tiny {
+                x: Math.round(root.px * 0.6)
+                y: Math.round(root.px * 0.3)
+                text: "NET"
             }
-        }
+            Tiny {
+                anchors.right: parent.right
+                anchors.rightMargin: Math.round(root.px * 0.8)
+                y: Math.round(root.px * 0.3)
+                text: "PEAK " + Stats.compactRate(Math.max(0, ...spark.samples))
+            }
 
-        Rectangle {
-            visible: spark.points.length >= 2
-            readonly property real size: Math.max(3, Math.round(root.px * 0.35))
-            width: size
-            height: size
-            x: spark.width - size + 1
-            y: (spark.points.length ? spark.points[spark.points.length - 1].y : 0) - size / 2
-            color: Theme.a2
+            // Sparkline. Points are recomputed only when netHistory or the plot size
+            // changes (every 2 s).
+            Item {
+                id: spark
+                anchors { fill: parent; topMargin: Math.round(root.px * 1.6) }
+
+                readonly property var samples: Stats.netHistory
+                readonly property real peak: Math.max(1, ...samples)
+                readonly property var points: {
+                    const n = samples.length;
+                    if (n < 2 || width <= 0)
+                        return [];
+                    const h = height;
+                    return samples.map((v, i) => Qt.point(i * width / (n - 1), h - 1 - v / peak * (h - 3)));
+                }
+
+                Shape {
+                    anchors.fill: parent
+                    visible: spark.points.length >= 2
+                    preferredRendererType: Shape.CurveRenderer
+
+                    ShapePath {
+                        strokeWidth: -1
+                        fillColor: Qt.alpha(Theme.a1, 0.14)
+                        PathPolyline {
+                            path: spark.points.length >= 2
+                                ? [Qt.point(0, spark.height)].concat(spark.points, [Qt.point(spark.width, spark.height)])
+                                : []
+                        }
+                    }
+
+                    ShapePath {
+                        strokeColor: Theme.a1
+                        strokeWidth: 1.2
+                        fillColor: "transparent"
+                        capStyle: ShapePath.FlatCap
+                        joinStyle: ShapePath.RoundJoin
+                        PathPolyline { path: spark.points }
+                    }
+                }
+
+                Rectangle {
+                    visible: spark.points.length >= 2
+                    readonly property real size: Math.max(4, Math.round(root.px * 0.45))
+                    width: size
+                    height: size
+                    x: spark.width - size
+                    y: (spark.points.length ? spark.points[spark.points.length - 1].y : 0) - size / 2
+                    color: Theme.a2
+                }
+            }
         }
     }
 
     component Caption: Text {
         color: Theme.dim
         font.family: Theme.font
-        font.pixelSize: Math.round(root.px * 0.9)
+        font.pixelSize: root.capPx
         textFormat: Text.StyledText
     }
 
@@ -160,16 +262,22 @@ ColumnLayout {
         Caption {
             id: up
             anchors.left: parent.left
-            text: "up <font color=\"" + Theme.fg + "\">" + Stats.compactRate(Stats.netUp) + "</font>"
+            anchors.leftMargin: 2
+            text: "<font color=\"" + Theme.a1 + "\">▲</font> <font color=\"" + Theme.fg + "\">" + Stats.compactRate(Stats.netUp) + "</font>"
         }
         Caption {
             anchors.horizontalCenter: parent.horizontalCenter
+            width: Math.min(implicitWidth, parent.width - 2 * Math.max(up.implicitWidth, down.implicitWidth) - root.px * 2)
+            elide: Text.ElideMiddle
             text: Stats.netConn !== "" ? Stats.netConn : "--"
             textFormat: Text.PlainText  // an interface name: not the Caption's StyledText
+            font.letterSpacing: root.capPx * 0.06
         }
         Caption {
+            id: down
             anchors.right: parent.right
-            text: "down <font color=\"" + Theme.fg + "\">" + Stats.compactRate(Stats.netDown) + "</font>"
+            anchors.rightMargin: 2
+            text: "<font color=\"" + Theme.a2 + "\">▼</font> <font color=\"" + Theme.fg + "\">" + Stats.compactRate(Stats.netDown) + "</font>"
         }
     }
 }

@@ -12,10 +12,14 @@
 #   2. through tests/rig/rail-hud.qml (production CentreClock and Rail over a click
 #      counting background window): the HUD texts (real output name, pool slot, the
 #      binds.lua key hints) follow a workspace switch; a click on the HUD reaches the
-#      window below it; the rail sections run from the top to the bottom of the rail; the
+#      window below it; the rail sections run from the top to the bottom of the rail with
+#      the inner padding (14 px left/right, 12 px top/bottom) and one 18 px gap between
+#      sections (the spare height above CLAUDE); the
 #      CPU temperature probe and TMP row on fake hwmon/thermal trees (k10temp, coretemp,
 #      x86_pkg_temp, none), two readings, the warn colour, unknown and garbage values;
-#      DISK (parseDf fixtures, a fake df: rows, warn from 90%, one df per refresh and none
+#      DISK (parseDf fixtures, a fake df: rows labelled by the full mount point with the
+#      filesystem type, a long mount point ellipsized in the middle, warn from 90%, one df
+#      per refresh and none
 #      per tick), VOLUME on a private PipeWire (fake-pipewire.sh: default sink name and
 #      volume, mute, switch, no sink, streams, markup names as plain text) and the
 #      always-visible BLUETOOTH section.
@@ -80,7 +84,9 @@ no_rail() { [[ "$(nlayer rice-rail)" == 0 && "$(nlayer rice-rail-zone)" == 0 ]];
 status_is() { [[ "$(ipc rail status)" == "$1" ]]; }
 
 # Lowest and highest rows (screen y) in the rail interior holding text/graph pixels:
-# anything clearly brighter than the background, 4 px in from the rail's border.
+# anything clearly brighter than the background, from 12 px in from the rail's left border
+# (clear of the top-left cut corner) to 14 px in from the right one. With the 12 px
+# bottom padding and CLAUDE's one-row `no data`, the lowest text ends at about y 1054.
 rail_extent() { # <png> <monitor-x> -> "top bottom"
     local raw="$tmp/shot.rgb"
     magick "$1" -depth 8 "RGB:$raw"
@@ -88,10 +94,27 @@ rail_extent() { # <png> <monitor-x> -> "top bottom"
 import sys
 raw = open(sys.argv[1], "rb").read()
 w, h = 1920, len(raw) // (1920 * 3)
-x0, x1 = 1482 + 4, 1914 - 14   # clear of the border and the bottom-right cut corner
+x0, x1 = 1482 + 12, 1914 - 14   # clear of the border and both cut corners
 rows = [y for y in range(38 + 4, 1074 - 4)
         if any(max(raw[(y * w + x) * 3:(y * w + x) * 3 + 3]) > 90 for x in range(x0, x1))]
 print(rows[0] if rows else -1, rows[-1] if rows else -1)' "$raw"
+}
+
+# Bright pixels (text, bars, graph) in the rail's inner padding band: 2..11 px inside the
+# left and right border, 2..9 px inside the top and bottom border (clear of the cut
+# corners). Prints the count per side "left top right bottom": 0 0 0 0 = nothing glued
+# to the border. Frames inside the rail are Theme.line (max channel 0x30 < 90).
+rail_pad_ink() { # <png> -> "l t r b"
+    local raw="$tmp/pad.rgb"
+    magick "$1" -depth 8 "RGB:$raw"
+    python3 -I -c '
+import sys
+raw = open(sys.argv[1], "rb").read()
+w = 1920
+def ink(xs, ys):
+    return sum(1 for y in ys for x in xs if max(raw[(y * w + x) * 3:(y * w + x) * 3 + 3]) > 90)
+print(ink(range(1484, 1494), range(52, 1060)), ink(range(1496, 1900), range(40, 48)),
+      ink(range(1902, 1912), range(52, 1060)), ink(range(1486, 1890), range(1064, 1072)))' "$raw"
 }
 
 # --- 1. production shell.qml --------------------------------------------------------
@@ -118,9 +141,12 @@ status_is "shown eDP-1" && pass "ipc rail status: 'shown eDP-1'" || fail "status
 
 "$R/qs-run.sh" shot eDP-1 "$SHOTS/rail-eDP-1.png" >/dev/null
 read -r top bot < <(rail_extent "$SHOTS/rail-eDP-1.png" "$ex")
-[[ "$top" -le 56 && "$bot" -ge 1055 ]] \
+[[ "$top" -le 56 && "$bot" -ge 1045 ]] \
     && pass "screenshot: rail content runs from y $top to y $bot (rail 38..1074: full height)" \
     || fail "rail extent on screen: $top..$bot (content bunched at the top?)"
+ink=$(rail_pad_ink "$SHOTS/rail-eDP-1.png")
+[[ "$ink" == "0 0 0 0" ]] && pass "screenshot: no text or bars in the rail's inner padding band (nothing glued to the border)" \
+    || fail "bright pixels in the padding band (left top right bottom): $ink"
 "$R/qs-run.sh" shot DP-1 "$SHOTS/rail-DP-1.png" >/dev/null
 
 # b. Toggle: hidden = no rail surface, no zone; shown again = as before.
@@ -151,7 +177,7 @@ wait_for 25 rail_on DP-1 || true
     || fail "fallback: monitors '$(monitors)' $(layer rice-rail) reserved '$(reserved)' $(ipc rail status)"
 "$R/qs-run.sh" shot DP-1 "$SHOTS/rail-fallback-DP-1.png" >/dev/null
 read -r top bot < <(rail_extent "$SHOTS/rail-fallback-DP-1.png" 0)
-[[ "$top" -le 56 && "$bot" -ge 1055 ]] && pass "fallback rail on DP-1 is full height too ($top..$bot)" || fail "fallback extent $top..$bot"
+[[ "$top" -le 56 && "$bot" -ge 1045 ]] && pass "fallback rail on DP-1 is full height too ($top..$bot)" || fail "fallback extent $top..$bot"
 ipc rail toggle
 wait_for 25 no_rail && status_is "hidden DP-1" && [[ "$(reserved)" == "DP-1[0, 32, 0, 0]" ]] \
     && pass "toggle on the fallback screen hides it there" || fail "fallback toggle: $(layers)"
@@ -252,11 +278,13 @@ echo "  rail: $(pj "d['rail']")"
 import json, sys
 r = json.loads(sys.argv[1])
 s = r["sections"]
+g = r["gaps"]
 ok = ([x[0] for x in s] == ["sys", "disk", "volume", "bluetooth", "claude"] and s[0][1] < 10
-      and abs(r["lastBottom"] - r["clipHeight"]) <= 2 and 40 <= r["spark"][1] <= 60
-      and r["columnImplicit"] <= r["clipHeight"] and min(r["rowHeights"]) >= 18)
+      and r["pad"] == [14, 12, 14, 12] and all(x == 18 for x in g[:-1]) and g[-1] >= 18
+      and abs(r["lastBottom"] - r["clipHeight"]) <= 2 and 48 <= r["spark"][1] <= 200
+      and r["columnImplicit"] <= r["clipHeight"] and min(r["rowHeights"]) >= 26)
 sys.exit(not ok)' "$(pj "json.dumps(d['rail'])")" \
-    && pass "rail layout: SYS, DISK, VOLUME, BLUETOOTH, CLAUDE (no clock, no media without a player); CLAUDE ends at the bottom edge ($(pj "d['rail']['lastBottom']") of $(pj "d['rail']['clipHeight']") px); graph capped at $(pj "d['rail']['spark'][1]") px; SYS rows $(pj "d['rail']['rowHeights']") px high" \
+    && pass "rail layout: SYS, DISK, VOLUME, BLUETOOTH, CLAUDE (no clock, no media without a player); padding $(pj "d['rail']['pad']") px (left top right bottom); section gaps $(pj "d['rail']['gaps']") px (18 px, the spare above CLAUDE); CLAUDE ends at the bottom edge ($(pj "d['rail']['lastBottom']") of $(pj "d['rail']['clipHeight']") px); graph $(pj "d['rail']['spark'][1]") px (grows into spare height, capped); SYS rows $(pj "d['rail']['rowHeights']") px high" \
     || fail "rail layout: $(pj "d['rail']")"
 
 # d. CPU temperature: probe order, two readings, warn, unknown and garbage values.
@@ -352,6 +380,12 @@ wait_for 25 disk_rows_are 3 || true
     == "[('/', '40/49G  85%', 9, False, ['$A1_C', '$LINE_C']), ('/mnt/big data', '1.7/1.8T  98%', 10, True, ['$WARN_C']), ('/data', '354/373G  95%', 10, True, ['$WARN_C'])]" ]] \
     && pass "DISK rows from the fake df: '/ 40/49G 85%' a1, 98% and 95% in the warn colour (>= 90%)" \
     || fail "DISK rows: $(dj "['rows']")"
+# The label column shows the whole mount point (df's `Mounted on`; the old rail cut
+# '/mnt/big data' to '…g data'), the type after it where it fits (not after the long one).
+[[ "$(pj "[(r['label'], r['truncated'], r['elide'], r['sub']) for r in d['disk']['rows']]")" \
+    == "[('/', False, 2, 'ext4'), ('/mnt/big data', False, 2, ''), ('/data', False, 2, 'ext4')]" ]] \
+    && pass "DISK labels: '/', '/mnt/big data', '/data' shown in full (not truncated), filesystem type 'ext4' beside the short ones" \
+    || fail "DISK labels: $(pj "[(r['label'], r['truncated'], r['elide'], r['sub']) for r in d['disk']['rows']]")"
 "$R/qs-run.sh" shot eDP-1 "$SHOTS/rail-disk-eDP-1.png" >/dev/null
 : >"$tmp/df.log"
 sleep 10
@@ -363,6 +397,14 @@ sleep 8.2
 runs=$(grep -c . "$tmp/df.log" || true)
 [[ "$runs" -ge 1 && "$runs" -le 3 ]] && pass "diskEvery 2: $runs df runs in 8 s (every 2nd tick, one short-lived process each)" || fail "diskEvery 2: $runs runs"
 ipc probe setDiskEvery 30
+long="/run/media/rig/Extreme SSD Backup 2TB"
+printf 'Filesystem Type 1-blocks Used Available Capacity Mounted on\n/dev/x ext4 1000 990 10 99%% /\n/dev/y btrfs 2000000000000 1000000000000 1000000000000 50%% %s\n' "$long" >"$tmp/df.out"
+ipc probe refreshDisks
+disk_long() { [[ "$(pj "[r['label'] for r in d['disk']['rows']]")" == "['/', '$long']" ]]; }
+wait_for 25 disk_long && [[ "$(pj "[(r['truncated'], r['elide'], r['sub']) for r in d['disk']['rows']][1]")" == "(True, 2, '')" ]] \
+    && pass "a long mount point ('$long') is the row label, ellipsized in the middle (Text.ElideMiddle), no type beside it" \
+    || fail "long mount: $(dj "['rows']")"
+"$R/qs-run.sh" shot eDP-1 "$SHOTS/rail-disk-long-eDP-1.png" >/dev/null
 printf 'Filesystem Type 1-blocks Used Available Capacity Mounted on\n/dev/x ext4 1000 990 10 99%% /\n' >"$tmp/df.out"
 ipc probe refreshDisks
 disk_one() { [[ "$(pj "[r['text'] for r in d['disk']['rows']]")" == "['0.0/0.0M  99%']" ]]; }

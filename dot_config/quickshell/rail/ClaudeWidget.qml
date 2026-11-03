@@ -1,6 +1,7 @@
 // Rail CLAUDE section (render .row3 .sg .rst): `// CLAUDE ─── 2m ago`, then `5H` and
-// `7D` as `LABEL [10 segments] NN%` (warn above 75) with a dim `resets in 2h 14m` line
-// (`resets Mon 09:00`, weekday and local time, beyond 24 h).
+// `7D` as inline StatRows `LABEL [10 segments] NN%` (the rail's row size, warn above 75)
+// each with a dim `resets in 2h 14m` line under its bar (`resets Mon 09:00`, weekday and
+// local time, beyond 24 h).
 // Data: ~/.cache/claude-limits.json, written atomically by claude-limits-statusline
 // (spec 5.6, limits.py): {"five_hour": {"pct": N, "resets_at": N} | null,
 // "seven_day": ... | null, "updated_at": N}, unix seconds.
@@ -23,6 +24,7 @@ ColumnLayout {
     id: root
 
     property real px: Theme.px
+    property real rowPx: Math.round(px * 1.5)
     property string cachePath: Quickshell.env("HOME") + "/.cache/claude-limits.json"
     readonly property int staleAfter: 30 * 60
 
@@ -85,7 +87,7 @@ ColumnLayout {
         { label: "7D", w: limits.seven }
     ].filter(r => r.w !== null)
 
-    spacing: 0
+    spacing: Math.round(px * 0.6)
 
     FileView {
         id: cache
@@ -117,18 +119,16 @@ ColumnLayout {
 
     SectionLabel {
         Layout.fillWidth: true
-        Layout.bottomMargin: Math.round(root.px * 0.15)
+        Layout.bottomMargin: Math.round(root.px * 0.3)
         px: root.px
         text: "claude"
         note: root.note
     }
 
-    Text {
+    EmptyNote {
         visible: root.noData
+        px: root.px
         text: "no data"
-        color: Theme.dim
-        font.family: Theme.font
-        font.pixelSize: root.px
     }
 
     Repeater {
@@ -143,72 +143,51 @@ ColumnLayout {
             Layout.fillWidth: true
             spacing: 0
 
-            RowLayout {
+            StatRow {
+                id: bar
+                visible: !win.expired
+                px: root.rowPx
+                label: win.modelData.label
+                value: win.pct
+                text: Math.round(win.pct) + "%"
+                litColor: root.stale ? Theme.dim : win.pct > 75 ? Theme.warn : Theme.a1
+                valueColor: root.stale ? Theme.dim : Theme.fg
+            }
+
+            // An expired window: its label and `no data` in place of the bar.
+            Item {
+                visible: win.expired
                 Layout.fillWidth: true
-                spacing: Math.round(root.px * 0.5)
+                implicitHeight: bar.rowHeight
 
                 Text {
-                    Layout.preferredWidth: Math.round(root.px * 2.4)
+                    anchors.verticalCenter: parent.verticalCenter
                     text: win.modelData.label
                     color: Theme.dim
                     font.family: Theme.font
-                    font.pixelSize: root.px
-                    font.letterSpacing: root.px * 0.08
+                    font.pixelSize: bar.labelPx
+                    font.letterSpacing: bar.labelPx * 0.12
                 }
 
                 Text {
-                    visible: win.expired
-                    Layout.fillWidth: true
+                    anchors.verticalCenter: parent.verticalCenter
+                    x: bar.labelWidth + bar.gap
                     text: "no data"
                     color: Theme.dim
                     font.family: Theme.font
-                    font.pixelSize: root.px
-                }
-
-                // 10 segments, 1px apart (render .sg), as in the SYS rows.
-                Item {
-                    id: segs
-                    visible: !win.expired
-                    Layout.fillWidth: true
-                    implicitHeight: Math.round(root.px * 0.6)
-                    readonly property int lit: Math.round(win.pct / 10)
-                    readonly property real cell: (width - 9) / 10
-
-                    Repeater {
-                        model: 10
-
-                        Rectangle {
-                            required property int index
-                            x: Math.round(index * (segs.cell + 1))
-                            width: Math.round((index + 1) * (segs.cell + 1) - 1) - x
-                            height: segs.height
-                            color: index >= segs.lit ? Theme.line
-                                : root.stale ? Theme.dim
-                                : win.pct > 75 ? Theme.warn : Theme.a1
-                        }
-                    }
-                }
-
-                Text {
-                    visible: !win.expired
-                    Layout.preferredWidth: Math.round(root.px * 2.6)
-                    horizontalAlignment: Text.AlignRight
-                    text: Math.round(win.pct) + "%"
-                    color: root.stale ? Theme.dim : Theme.fg
-                    font.family: Theme.font
-                    font.pixelSize: root.px
+                    font.pixelSize: Math.round(root.px * 1.1)
                 }
             }
 
             Text {
                 visible: !win.expired
-                Layout.leftMargin: Math.round(root.px * 2.9)
-                Layout.topMargin: -Math.round(root.px * 0.15)
-                Layout.bottomMargin: Math.round(root.px * 0.2)
+                Layout.leftMargin: bar.labelWidth + bar.gap
+                Layout.topMargin: -Math.round(root.px * 0.4)
                 text: root.resetText(win.modelData.w.resets, root.now)
                 color: Theme.dim
                 font.family: Theme.font
-                font.pixelSize: Math.round(root.px * 0.9)
+                font.pixelSize: root.px
+                font.letterSpacing: root.px * 0.04
             }
         }
     }
