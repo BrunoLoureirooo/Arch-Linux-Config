@@ -24,17 +24,10 @@ MIN_STEP = 6  # px: smaller moves are jitter, not a direction
 MIN_SWING = 50  # px: a swing shorter than this is not a shake
 REVERSALS = 4  # direction changes inside WINDOW
 HOLD = 0.8  # seconds without shaking before shrinking back
-DEBUG = os.environ.get("CURSOR_SHAKE_DEBUG")  # file to log swing counts to, for tuning
 
 
 def is_shake(samples):
     """samples: [(t, x, y)] inside WINDOW. True for a rapid back-and-forth swing on x or y."""
-    return swings(samples) >= REVERSALS
-
-
-def swings(samples):
-    """Most direction changes (each after a swing of MIN_SWING px or more) on either axis."""
-    best = 0
     for axis in (1, 2):
         dirs = []  # +1/-1 per swing, with the travelled distance of that swing
         last = samples[0][axis] if samples else 0
@@ -50,8 +43,10 @@ def swings(samples):
                 run = 0
             sign = 1 if d > 0 else -1
             run += abs(d)
-        best = max(best, sum(1 for r in dirs if r >= MIN_SWING))
-    return best
+        reversals = sum(1 for r in dirs if r >= MIN_SWING)
+        if reversals >= REVERSALS:
+            return True
+    return False
 
 
 def pointer_nodes(devices_text, exclude=("xremap",)):
@@ -84,11 +79,7 @@ def hypr(cmd):
 
 
 def set_size(size):
-    reply = hypr("/setcursor %s %d" % (THEME, size))
-    if DEBUG:
-        with open(DEBUG, "a") as f:
-            f.write("%.2f setcursor %d -> %r\n" % (time.monotonic(), size, reply))
-    return reply == "ok"
+    return hypr("/setcursor %s %d" % (THEME, size)) == "ok"
 
 
 def open_new(fds):
@@ -123,7 +114,6 @@ def main():
     shaken_at = 0.0
     last_move = 0.0
     last_pos = None
-    last_poll = 0.0
     try:
         while True:
             open_new(fds)
@@ -131,10 +121,7 @@ def main():
             ready, _, _ = select.select(list(fds), [], [], POLL if moving else 30)
             if ready:
                 drain(fds)
-                # Events arrive in bursts; cap the position reads at ~60 a second.
-                time.sleep(max(0, POLL - (time.monotonic() - last_poll)))
-            last_poll = time.monotonic()
-            now = last_poll
+            now = time.monotonic()
             if not ready and not moving:
                 continue  # 30 s timeout: only to notice a hot-plugged mouse
             try:
@@ -147,13 +134,6 @@ def main():
                 last_move = now
                 samples.append((now, pos[0], pos[1]))
             samples = [s for s in samples if now - s[0] <= WINDOW]
-            if DEBUG and len(samples) > 3:
-                n = swings(samples)
-                if n:
-                    with open(DEBUG, "a") as f:
-                        f.write("%.2f n=%d samples=%d span=%.0fx%.0f\n" % (now, n, len(samples),
-                                max(s[1] for s in samples) - min(s[1] for s in samples),
-                                max(s[2] for s in samples) - min(s[2] for s in samples)))
             if len(samples) > 3 and is_shake(samples):
                 shaken_at = now
                 if not big and set_size(BIG):
