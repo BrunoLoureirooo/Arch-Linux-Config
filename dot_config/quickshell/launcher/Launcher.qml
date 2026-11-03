@@ -153,7 +153,7 @@ Scope {
                 x: Math.round((win.width - width) / 2)
                 y: Math.round(win.height * 0.18)
                 width: Math.round(root.px * 36)
-                height: Math.round(list.implicitHeight + root.px * 0.2 + root.px * 0.5)
+                height: Math.round(list.implicitHeight + root.px * 0.2 + root.px * 0.8)
                 cut: Math.round(root.px)
                 stroke: Theme.a1
                 fill: Theme.bg

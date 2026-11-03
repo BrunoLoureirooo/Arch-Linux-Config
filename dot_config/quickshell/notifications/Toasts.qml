@@ -132,7 +132,7 @@ Scope {
                         onDueChanged: if (due) n.expire()
 
                         width: column.width
-                        height: content.implicitHeight + Math.round(root.px * 0.4) + Math.round(root.px * 0.5)
+                        height: content.implicitHeight + Math.round(root.px * 0.7) + Math.round(root.px * 0.7)
                         cut: 8
                         stroke: Theme.a2
                         fill: Theme.bg
@@ -141,7 +141,7 @@ Scope {
                             id: content
                             anchors {
                                 top: parent.top; left: parent.left; right: parent.right
-                                topMargin: Math.round(root.px * 0.4)
+                                topMargin: Math.round(root.px * 0.7)
                                 leftMargin: toast.padX; rightMargin: toast.padX
                             }
                             spacing: 0

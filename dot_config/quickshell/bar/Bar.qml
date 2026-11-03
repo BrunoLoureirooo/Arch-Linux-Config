@@ -21,6 +21,8 @@ PanelWindow {
     // The render's bar font is 0.84em of the 12px screen font.
     readonly property real px: Math.round(Theme.px * 0.84)
     readonly property real gap: px  // 1em between items
+    // Inner padding: the left and right groups sit 1.2em (screen font) in from the ends.
+    readonly property real inset: Math.round(Theme.px * 1.2)
     readonly property var monitor: screen ? Hyprland.monitors.values.find(m => m.name === screen.name) ?? null : null
 
     // Focused window when it is on this screen, else the first window on this screen's
@@ -67,7 +69,7 @@ PanelWindow {
 
     Row {
         id: left
-        anchors { left: parent.left; leftMargin: Math.round(bar.px * 0.7); verticalCenter: parent.verticalCenter }
+        anchors { left: parent.left; leftMargin: bar.inset; verticalCenter: parent.verticalCenter }
         spacing: bar.gap
 
         Chamfer {
@@ -143,7 +145,7 @@ PanelWindow {
     }
 
     Row {
-        anchors { right: parent.right; rightMargin: Math.round(bar.px * 0.7); verticalCenter: parent.verticalCenter }
+        anchors { right: parent.right; rightMargin: bar.inset; verticalCenter: parent.verticalCenter }
         spacing: bar.gap
 
         Chip {

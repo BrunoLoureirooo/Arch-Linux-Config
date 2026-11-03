@@ -72,8 +72,9 @@ Row {
             readonly property bool active: root.current.filled === slot
             readonly property bool occupied: ws !== null && ws.toplevels.values.length > 0
 
-            implicitWidth: Math.round(root.px * 1.8)
-            implicitHeight: label.implicitHeight + 2 + 2
+            // Text clear of the fill's edges: 2 px above, the 2 px underline + 2 px below.
+            implicitWidth: Math.round(root.px * 2.0)
+            implicitHeight: label.implicitHeight + 2 + 4
 
             Rectangle {
                 anchors.fill: parent
@@ -84,7 +85,7 @@ Row {
             Text {
                 id: label
                 anchors.horizontalCenter: parent.horizontalCenter
-                y: 1
+                y: 2
                 text: cell.slot
                 color: cell.active ? Theme.bg : cell.occupied ? Theme.fg : Theme.dim
                 font.family: Theme.font
