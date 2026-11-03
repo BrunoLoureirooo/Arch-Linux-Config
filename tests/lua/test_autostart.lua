@@ -16,7 +16,6 @@ handlers[1].fn()
 
 local want = {
     "~/.local/bin/qs-supervise",
-    "~/.local/bin/cursor-shake",
     "blueman-applet",
     "~/.local/bin/librepods --start-minimized",
     "~/.local/bin/airpods-autoconnect",

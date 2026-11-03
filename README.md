@@ -15,7 +15,6 @@ Personal Arch Linux dotfiles managed with [chezmoi](https://www.chezmoi.io/).
 | `~/.local/bin/rice-palette`, `~/.local/share/rice/` | Palette tool: derives the neon palette from a wallpaper with matugen and writes the shell, kitty, Hyprland and btop colours |
 | `~/.local/bin/claude-limits-statusline` | Claude Code status line command that caches the 5 h / 7 d usage limits for the rail ([setup](docs/claude-statusline.md)) |
 | `~/.local/bin/qs-supervise` | Restarts Quickshell if it exits (1 s; backs off up to 30 s if it keeps failing at startup; stops with the compositor); runs it with transparent huge pages off, which cuts its memory ([why](docs/deploy.md#11-memory-the-156-mb-budget-is-not-met)) |
-| `~/.local/bin/cursor-shake` | Shake the pointer to enlarge it (like macOS): sleeps on the mouse/touchpad event nodes, reads the position from Hyprland only while the pointer moves, grows the cursor 24 → 96 px on a quick back-and-forth swing and shrinks it 0.8 s after the shaking stops |
 | `~/.local/bin/lid`, `~/.local/bin/headless` | Lid switch (drop/restore the laptop panel) and the headless hotkey (displays dark, then mouse/keyboard power cut via `headless-peripherals`); work under the Lua config and the hyprlang rollback |
 | `~/.config/waybar/` | Waybar status bar config and stylesheet (retired by the Quickshell shell, kept for rollback) |
 | `~/.config/wofi/` | Wofi launcher config and stylesheet (retired by the Quickshell launcher, kept for rollback) |

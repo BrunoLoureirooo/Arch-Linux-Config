@@ -5,7 +5,6 @@
 -- is only on PATH in interactive shells (.bashrc).
 hl.on("hyprland.start", function()
     hl.exec_cmd("~/.local/bin/qs-supervise")
-    hl.exec_cmd("~/.local/bin/cursor-shake") -- shake the pointer to enlarge it, like macOS
     hl.exec_cmd("blueman-applet")
     hl.exec_cmd("~/.local/bin/librepods --start-minimized")
     hl.exec_cmd("~/.local/bin/airpods-autoconnect")
