@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# lid close|open -- drop or restore the built-in panel as an output.
+# Bound to the lid switch in hyprland.lua (and in the hyprland.conf rollback copy).
+#
+# Nothing here touches headless mode: the lid only changes which outputs exist,
+# it never darkens the externals or cuts peripheral power. The laptop also never
+# suspends on a lid close -- logind is set to ignore the switch in
+# /etc/systemd/logind.conf.d/10-headless.conf, since this machine doubles as a
+# homeserver node.
+#
+# Works under both config formats: the Lua config (Hyprland 0.56, `hyprctl eval`;
+# `hyprctl keyword` is refused there) and the legacy hyprlang hyprland.conf the
+# rollback restores (`hyprctl keyword`). hyprctl exits 0 even when it refuses a
+# request, so success is the literal "ok" reply.
+set -u
+
+BUILTIN=eDP-1
+
+hypr_ok() { [ "$(hyprctl "$@" 2>&1)" = ok ]; }
+
+case "${1:-}" in
+  close)
+    # A shut panel must not merely go dark: while the output stays enabled it
+    # still holds a workspace, so new windows open onto a screen nobody can see.
+    # Disabling it hands its workspaces back to the remaining monitor.
+    #
+    # Only while another output is live. `hyprctl monitors` lists enabled
+    # monitors only, one "disabled" key each, so >1 means something other than
+    # the panel is up. If the built-in is the only screen there is nowhere else
+    # for windows to go, so leave it alone.
+    if [ "$(hyprctl monitors -j | grep -c '"disabled"')" -gt 1 ]; then
+        hypr_ok eval "hl.monitor({ output = \"$BUILTIN\", disabled = true })" \
+            || hypr_ok keyword monitor "$BUILTIN, disable" \
+            || { echo "${0##*/}: could not disable $BUILTIN" >&2; exit 1; }
+    fi
+    ;;
+  open)
+    # A plain reload re-applies the monitor line from the config (hyprland.lua, or
+    # hyprland.conf after a rollback), so that file stays the single source of truth
+    # for the panel's mode and position. The reload is also the only thing that
+    # re-enables the panel: nothing else here undoes the close.
+    hyprctl reload >/dev/null
+    ;;
+  *)
+    echo "usage: ${0##*/} close|open" >&2; exit 1 ;;
+esac

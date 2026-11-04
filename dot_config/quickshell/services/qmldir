@@ -1,0 +1,4 @@
+singleton Stats Stats.qml
+singleton Screens Screens.qml
+singleton Clock Clock.qml
+singleton Overlays Overlays.qml

@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+"""claude-limits-statusline: Claude Code status line command.
+
+Reads the status line JSON on stdin, caches the usage windows for the Quickshell widget
+and prints a short footer line. Cache: $CLAUDE_LIMITS_CACHE or ~/.cache/claude-limits.json.
+Always exits 0 and never prints errors. Reads usage numbers only, never credentials.
+"""
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+MAX_STDIN = 1 << 20
+
+
+def read_payload():
+    try:
+        raw = sys.stdin.buffer.read(MAX_STDIN + 1)
+        if len(raw) > MAX_STDIN:
+            return None
+        payload = json.loads(raw.decode("utf-8"))
+    except (OSError, ValueError, RecursionError, AttributeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def main():
+    # Imported here so a missing or broken library exits quietly instead of tracing back.
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "share" / "rice"))
+    import limits
+
+    payload = read_payload()
+    if payload is None:
+        return
+    data = limits.parse_rate_limits(payload, time.time())
+    path = os.environ.get("CLAUDE_LIMITS_CACHE") or os.path.join(
+        os.path.expanduser("~"), ".cache", "claude-limits.json")
+    # Claude Code omits rate_limits early in a session; that must not erase good data,
+    # so an empty result is written only when there is no cache at all yet.
+    if (data["five_hour"] or data["seven_day"]) or not os.path.exists(path):
+        try:
+            limits.write_cache(path, data)
+        except (OSError, ValueError, TypeError):
+            pass
+    line = limits.render_line(data)
+    if line:
+        try:
+            sys.stdout.write(line + "\n")
+            sys.stdout.flush()
+        except (OSError, ValueError):
+            # Broken stdout: point fd 1 at /dev/null so the interpreter's shutdown flush
+            # of the leftover buffer cannot fail, print a warning or change the exit code.
+            os.dup2(os.open(os.devnull, os.O_WRONLY), 1)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except BaseException:
+        pass
+    sys.exit(0)
